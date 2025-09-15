@@ -174,6 +174,17 @@
             </div>
           </div>
 
+          <!-- Tag Editor -->
+          <div v-else-if="interfaceType === 'tags' || interfaceType === 'tag-list'">
+            <TagEditor
+              :value="localValue"
+              :suggestions="getTagSuggestions()"
+              @update:value="handleTagChange"
+              @save="handleTagSave"
+              @cancel="cancelEdit"
+            />
+          </div>
+
           <!-- JSON/Code Editor for JSON fields -->
           <div v-else-if="isJsonField">
             <interface-input-code
@@ -400,6 +411,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useTableApi } from '../composables/api';
+import TagEditor from './CellRenderers/TagEditor.vue';
 // Note: useDrawer might not be available in all versions, we'll use alternative approach
 
 interface Props {
@@ -796,6 +808,26 @@ function handleDateTimeChange(value: any) {
   if (props.autoSave) {
     debouncedSave(value);
   }
+}
+
+function handleTagChange(tags: string[]) {
+  localValue.value = tags;
+  hasUnsavedChanges.value = true;
+
+  if (props.autoSave) {
+    debouncedSave(tags);
+  }
+}
+
+function handleTagSave(tags: string[]) {
+  localValue.value = tags;
+  saveAndClose();
+}
+
+function getTagSuggestions(): string[] {
+  // TODO: Could be enhanced to fetch suggestions from other records
+  // For now, return empty array
+  return [];
 }
 
 function handleJsonInput(value: string) {

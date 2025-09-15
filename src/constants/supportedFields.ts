@@ -68,8 +68,8 @@ export const SUPPORTED_INTERFACES: Record<string, boolean | 'partial'> = {
   file: false, // General files (PDFs, docs, etc.) are not supported
   files: false, // Multiple files are not supported
 
-  // Partially supported (with known issues)
-  tags: 'partial', // Issue #10 - needs proper support
+  // Tag interface - FULLY SUPPORTED with TagCell and TagEditor (Issue #10 resolved)
+  tags: true, // Fully supported with TagCell component and TagEditor popover
 
   // Date/Time interfaces - NOW SUPPORTED (Issue #5 fixed)
   datetime: true,

@@ -5,6 +5,37 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.14] - 2025-09-15
+
+### Added
+- Full support for Tag fields with visual tag editor (Issue #10)
+- TagCell component for visual tag display as chips in table cells
+- TagEditor component with popover-based editing interface
+- Native Directus v-chip integration for tag display and editing
+- Tag detection for both explicit 'tags' interface and JSON array fields
+- Enhanced field support system for tag fields
+- Popover-based tag editing with Add/Remove functionality
+
+### Changed
+- Updated supportedFields.ts: 'tags' interface now fully supported (was 'partial')
+- Enhanced InlineEditPopover.vue with dedicated tag editing interface
+- Improved field support detection for tag fields regardless of JSON type
+- Tag fields now display with proper edit icons instead of lock icons
+
+### Fixed
+- Tag fields are now properly recognized as editable in table view
+- Resolved field support level detection for tag interface with JSON type
+- Tag fields no longer show "limited support" warnings
+- Fixed edit icon display for tag fields (removed incorrect lock icon)
+
+### Technical Details
+- New component: `src/components/TagCell.vue` (display-only component)
+- New component: `src/components/CellRenderers/TagEditor.vue` (popover editor)
+- Enhanced: `src/components/InlineEditPopover.vue` with tag interface support
+- Updated: `src/components/EditableCellRelational.vue` with tag field integration
+- Modified: `src/utils/fieldSupport.ts` with special case handling for tag fields
+- Updated: `src/constants/supportedFields.ts` with full tag interface support
+
 ## [0.2.13] - 2025-09-10
 
 ### Fixed
