@@ -6,12 +6,7 @@
         v-for="(tag, index) in visibleTags"
         :key="`${tag}-${index}`"
         small
-        style="
-          --v-chip-background-color: var(--theme--primary-subdued);
-          --v-chip-color: var(--theme--primary);
-          margin-right: 4px;
-          margin-bottom: 2px;
-        "
+        class="tag-chip-display"
       >
         {{ tag }}
       </v-chip>
@@ -103,6 +98,14 @@ const additionalCount = computed(() => displayTags.value.length - props.maxVisib
   font-size: 0.875rem;
   color: var(--theme--foreground-subdued);
   font-style: italic;
+}
+
+/* Tag styling for table display */
+.tag-chip-display {
+  --v-chip-background-color: #e5e7eb !important; /* Grauer Hintergrund */
+  --v-chip-color: #1f2937 !important; /* Schwarze/dunkle Schrift */
+  margin-right: 4px;
+  margin-bottom: 2px;
 }
 
 /* Responsive behavior */

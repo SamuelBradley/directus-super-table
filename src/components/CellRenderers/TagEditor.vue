@@ -1,36 +1,31 @@
 <template>
   <div class="tag-editor">
-    <!-- Current tags display -->
-    <div v-if="localTags.length > 0" class="existing-tags">
-      <v-chip
-        v-for="(tag, index) in localTags"
-        :key="`edit-${tag}-${index}`"
-        close
-        small
-        @close="removeTag(index)"
-        style="
-          --v-chip-background-color: var(--theme--primary-subdued);
-          --v-chip-color: var(--theme--primary);
-          margin-right: 4px;
-          margin-bottom: 4px;
-        "
-      >
-        {{ tag }}
-      </v-chip>
-    </div>
-
-    <!-- Add new tag input -->
+    <!-- Add new tag input OBEN -->
     <div class="tag-input-container">
       <v-input
         v-model="newTag"
         placeholder="Type tag and press Enter..."
         autofocus
+        small
         @keydown.enter.prevent="addTag"
         @keydown.escape="$emit('cancel')"
       />
       <v-button v-if="newTag.trim()" @click="addTag" icon secondary small style="margin-left: 8px">
         <v-icon name="add" />
       </v-button>
+    </div>
+
+    <!-- Current tags display UNTEN -->
+    <div v-if="localTags.length > 0" class="existing-tags">
+      <v-chip
+        v-for="(tag, index) in localTags"
+        :key="`${tag}-${index}`"
+        x-small
+        class="tag-chip-native"
+        @click="removeTag(index)"
+      >
+        {{ tag }}
+      </v-chip>
     </div>
 
     <!-- Tag suggestions (if available) -->
@@ -61,11 +56,6 @@
       <span class="empty-text">No tags yet. Type above to add your first tag.</span>
     </div>
 
-    <!-- Action buttons -->
-    <div class="tag-actions">
-      <v-button @click="$emit('cancel')" secondary small> Cancel </v-button>
-      <v-button @click="saveChanges" :disabled="!hasChanges" small> Save Tags </v-button>
-    </div>
   </div>
 </template>
 
@@ -231,12 +221,15 @@ function saveChanges() {
   font-style: italic;
 }
 
-.tag-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--theme--border-color-subdued);
+/* CLEAN: Nur das Nötigste für native Tags */
+.tag-editor .v-chip {
+  --v-chip-color: white;
+  --v-chip-background-color: var(--theme--primary);
+  margin: 2px;
+}
+
+.tag-editor .v-chip:hover {
+  --v-chip-background-color: var(--theme--danger);
 }
 
 /* Responsive adjustments */
@@ -244,14 +237,6 @@ function saveChanges() {
   .tag-editor {
     min-width: 280px;
     max-width: 320px;
-  }
-
-  .tag-actions {
-    flex-direction: column;
-  }
-
-  .tag-actions > * {
-    width: 100%;
   }
 }
 </style>
