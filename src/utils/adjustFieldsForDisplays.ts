@@ -2,18 +2,114 @@
 import { useStores } from '@directus/extensions-sdk';
 
 /**
+ * Helper function to get the related collection for a field
+ */
+function getRelatedCollection(
+  parentCollection: string,
+  fieldName: string,
+  relationsStore: any
+): string | null {
+  try {
+    const relations = relationsStore.getRelationsForField(parentCollection, fieldName);
+    if (relations?.[0]) {
+      return relations[0].related_collection || relations[0].collection;
+    }
+  } catch {
+    // Relations not available
+  }
+  return null;
+}
+
+/**
+ * Check if a field exists in a collection
+ */
+function fieldExists(collection: string, fieldName: string, fieldsStore: any): boolean {
+  try {
+    return !!fieldsStore.getField(collection, fieldName);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if a collection is a native Directus system collection
+ */
+function isNativeDirectusCollection(collectionName: string | null): boolean {
+  return collectionName?.startsWith('directus_') ?? false;
+}
+
+/**
+ * Get display fields for file-based displays (image, file)
+ * Validates title field existence in directus_files before adding
+ */
+function getFileDisplayFields(
+  fieldKey: string,
+  additionalFields: string[],
+  fieldsStore: any
+): string[] {
+  const baseFields = ['id', 'type'];
+  const titleField = fieldExists('directus_files', 'title', fieldsStore) ? ['title'] : [];
+  const allFields = [...baseFields, ...titleField, ...additionalFields];
+  return allFields.map((f) => `${fieldKey}.${f}`);
+}
+
+/**
+ * Get display fields for relational fields (m2o, o2m, m2m, etc.)
+ * Implements three-tier validation strategy:
+ * 1. Translations: Return null (handled by deep parameter)
+ * 2. Native Directus collections: Validate each standard field
+ * 3. Custom collections: Only request safe id field
+ */
+function getDisplayFieldsForRelation(
+  field: any,
+  fieldKey: string,
+  parentCollection: string,
+  fieldsStore: any,
+  relationsStore: any
+): string[] | null {
+  // Special case: translations - schemas vary widely, use deep parameter
+  if (field?.meta?.special?.includes('translations')) {
+    return null; // Let deep parameter with _fields: ['*'] handle it
+  }
+
+  const fieldName = (field.field || field.key)?.split('.')[0];
+  const relatedCollection = getRelatedCollection(parentCollection, fieldName, relationsStore);
+
+  if (!relatedCollection) {
+    return null; // Can't determine collection - return field as-is
+  }
+
+  // Native Directus collections: Try standard fields with validation
+  if (isNativeDirectusCollection(relatedCollection)) {
+    const standardFields = ['id', 'status', 'title', 'name'];
+    const existingFields = standardFields
+      .filter((f) => fieldExists(relatedCollection, f, fieldsStore))
+      .map((f) => `${fieldKey}.${f}`);
+
+    // Fallback to id if no standard fields exist
+    return existingFields.length > 0 ? existingFields : [`${fieldKey}.id`];
+  }
+
+  // Custom collections: Conservative approach - only request id
+  return [`${fieldKey}.id`];
+}
+
+/**
  * Adjusts fields based on their display configuration, following the original Directus pattern.
  * This function replicates the core logic from Directus core for proper display field resolution.
+ * Enhanced with field existence validation to prevent requesting non-existent fields.
  */
 export function adjustFieldsForDisplays(
   fields: readonly string[],
   parentCollection: string
 ): string[] {
-  // Get the fields store, but handle the case where it's not available
+  // Get the stores, but handle the case where they're not available
   let fieldsStore: any = null;
+  let relationsStore: any = null;
   try {
-    const { useFieldsStore } = useStores();
+    const { useFieldsStore, useRelationsStore } = useStores();
     fieldsStore = useFieldsStore();
+    relationsStore = useRelationsStore();
   } catch {
     // Stores not available, return original fields
     return [...fields];
@@ -52,53 +148,54 @@ export function adjustFieldsForDisplays(
             break;
           }
           case 'image': {
-            // Image display needs these specific fields
-            displayFields = [
-              `${fieldKey}.id`,
-              `${fieldKey}.type`,
-              `${fieldKey}.title`,
-              `${fieldKey}.filename_download`,
-              `${fieldKey}.width`,
-              `${fieldKey}.height`,
-            ];
+            // Image display needs id, type, title (if exists), filename, dimensions
+            displayFields = getFileDisplayFields(
+              fieldKey,
+              ['filename_download', 'width', 'height'],
+              fieldsStore
+            );
             break;
           }
           case 'file': {
-            // File display needs these specific fields
-            displayFields = [
-              `${fieldKey}.id`,
-              `${fieldKey}.type`,
-              `${fieldKey}.title`,
-              `${fieldKey}.filename_download`,
-              `${fieldKey}.filesize`,
-            ];
+            // File display needs id, type, title (if exists), filename, size
+            displayFields = getFileDisplayFields(
+              fieldKey,
+              ['filename_download', 'filesize'],
+              fieldsStore
+            );
             break;
           }
           case 'user': {
             // User display needs these specific fields
+            // directus_users has standard schema, but validate avatar field
             displayFields = [
               `${fieldKey}.id`,
-              `${fieldKey}.avatar.id`,
               `${fieldKey}.email`,
               `${fieldKey}.first_name`,
               `${fieldKey}.last_name`,
             ];
+
+            // Only add avatar if it exists
+            if (fieldExists('directus_users', 'avatar', fieldsStore)) {
+              displayFields.push(`${fieldKey}.avatar.id`);
+            }
             break;
           }
           default: {
             // For other display types, try to get fields from display definition
-            // This is a fallback that covers most cases
+            // This is a fallback that covers most relational fields
             const isRelational = field?.meta?.special?.some((s: string) =>
               ['m2o', 'm2m', 'o2m', 'files', 'translations'].includes(s)
             );
 
-            if (isRelational) {
-              displayFields = [
-                `${fieldKey}.id`,
-                `${fieldKey}.status`,
-                `${fieldKey}.title`,
-                `${fieldKey}.name`,
-              ];
+            if (isRelational && relationsStore) {
+              displayFields = getDisplayFieldsForRelation(
+                field,
+                fieldKey,
+                parentCollection,
+                fieldsStore,
+                relationsStore
+              );
             }
             break;
           }
