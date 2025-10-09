@@ -55,7 +55,6 @@
     <div v-if="localTags.length === 0" class="empty-state">
       <span class="empty-text">No tags yet. Type above to add your first tag.</span>
     </div>
-
   </div>
 </template>
 
@@ -81,7 +80,6 @@ const emit = defineEmits<Emits>();
 
 // State
 const localTags = ref<string[]>([]);
-const originalTags = ref<string[]>([]);
 const newTag = ref('');
 
 // Initialize local tags from props
@@ -90,17 +88,11 @@ watch(
   (newValue) => {
     const parsedTags = parseTagsValue(newValue);
     localTags.value = [...parsedTags];
-    originalTags.value = [...parsedTags];
   },
   { immediate: true }
 );
 
 // Computed
-const hasChanges = computed(() => {
-  if (localTags.value.length !== originalTags.value.length) return true;
-  return !localTags.value.every((tag, index) => tag === originalTags.value[index]);
-});
-
 const suggestions = computed(() => {
   if (!props.suggestions || props.suggestions.length === 0) return [];
 
@@ -154,15 +146,6 @@ function addSuggestion(suggestion: string) {
 function removeTag(index: number) {
   localTags.value.splice(index, 1);
   emit('update:value', localTags.value);
-}
-
-function saveChanges() {
-  // Add current input as tag if it exists
-  if (newTag.value.trim()) {
-    addTag();
-  }
-
-  emit('save', localTags.value);
 }
 </script>
 

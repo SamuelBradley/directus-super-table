@@ -5,7 +5,7 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.15] - TBD
+## [0.2.15] - 2025-10-09
 
 ### Added
 - Full support for Tag fields with visual tag editor (Issue #10)
