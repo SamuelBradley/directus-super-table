@@ -1,5 +1,5 @@
 // CORE CHANGES - Following original Directus approach
-import { useStores } from '@directus/extensions-sdk';
+import { useStores, useCollection } from '@directus/extensions-sdk';
 
 /**
  * Helper function to get the related collection for a field
@@ -39,6 +39,28 @@ function isNativeDirectusCollection(collectionName: string | null): boolean {
 }
 
 /**
+ * Get the primary key field name for a collection
+ * Falls back to 'id' if collection is not found or primary key cannot be determined
+ */
+function getPrimaryKeyForCollection(collectionName: string | null): string {
+  if (!collectionName) {
+    return 'id';
+  }
+
+  try {
+    const { primaryKeyField } = useCollection(collectionName);
+    if (primaryKeyField?.value?.field) {
+      return primaryKeyField.value.field;
+    }
+  } catch {
+    // useCollection failed, use fallback
+  }
+
+  // Fallback to 'id' for unknown collections
+  return 'id';
+}
+
+/**
  * Get display fields for file-based displays (image, file)
  * Validates title field existence in directus_files before adding
  */
@@ -47,7 +69,9 @@ function getFileDisplayFields(
   additionalFields: string[],
   fieldsStore: any
 ): string[] {
-  const baseFields = ['id', 'type'];
+  // directus_files always uses 'id' as primary key (system collection)
+  const pkField = getPrimaryKeyForCollection('directus_files');
+  const baseFields = [pkField, 'type'];
   const titleField = fieldExists('directus_files', 'title', fieldsStore) ? ['title'] : [];
   const allFields = [...baseFields, ...titleField, ...additionalFields];
   return allFields.map((f) => `${fieldKey}.${f}`);
@@ -79,19 +103,22 @@ function getDisplayFieldsForRelation(
     return null; // Can't determine collection - return field as-is
   }
 
+  // Get the primary key field for the related collection
+  const pkField = getPrimaryKeyForCollection(relatedCollection);
+
   // Native Directus collections: Try standard fields with validation
   if (isNativeDirectusCollection(relatedCollection)) {
-    const standardFields = ['id', 'status', 'title', 'name'];
+    const standardFields = [pkField, 'status', 'title', 'name'];
     const existingFields = standardFields
       .filter((f) => fieldExists(relatedCollection, f, fieldsStore))
       .map((f) => `${fieldKey}.${f}`);
 
-    // Fallback to id if no standard fields exist
-    return existingFields.length > 0 ? existingFields : [`${fieldKey}.id`];
+    // Fallback to primary key if no standard fields exist
+    return existingFields.length > 0 ? existingFields : [`${fieldKey}.${pkField}`];
   }
 
-  // Custom collections: Conservative approach - only request id
-  return [`${fieldKey}.id`];
+  // Custom collections: Conservative approach - only request primary key
+  return [`${fieldKey}.${pkField}`];
 }
 
 /**
@@ -143,7 +170,15 @@ export function adjustFieldsForDisplays(
               displayFields = templateFields.map((f) => `${fieldKey}.${f}`);
             } else {
               // Default fields for related-values without template
-              displayFields = [`${fieldKey}.id`];
+              // Get the primary key of the related collection
+              const fieldName = fieldKey.split('.')[0];
+              const relatedCollection = getRelatedCollection(
+                parentCollection,
+                fieldName,
+                relationsStore
+              );
+              const pkField = getPrimaryKeyForCollection(relatedCollection);
+              displayFields = [`${fieldKey}.${pkField}`];
             }
             break;
           }
@@ -168,8 +203,9 @@ export function adjustFieldsForDisplays(
           case 'user': {
             // User display needs these specific fields
             // directus_users has standard schema, but validate avatar field
+            const userPkField = getPrimaryKeyForCollection('directus_users');
             displayFields = [
-              `${fieldKey}.id`,
+              `${fieldKey}.${userPkField}`,
               `${fieldKey}.email`,
               `${fieldKey}.first_name`,
               `${fieldKey}.last_name`,
@@ -177,7 +213,9 @@ export function adjustFieldsForDisplays(
 
             // Only add avatar if it exists
             if (fieldExists('directus_users', 'avatar', fieldsStore)) {
-              displayFields.push(`${fieldKey}.avatar.id`);
+              // Avatar references directus_files
+              const avatarPkField = getPrimaryKeyForCollection('directus_files');
+              displayFields.push(`${fieldKey}.avatar.${avatarPkField}`);
             }
             break;
           }
