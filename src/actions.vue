@@ -94,7 +94,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { useStores } from '@directus/extensions-sdk';
+import { useStores, useCollection } from '@directus/extensions-sdk';
 import { useI18n } from 'vue-i18n';
 import { useTableApi } from './composables/api';
 
@@ -342,15 +342,28 @@ async function duplicateSelectedItems() {
     return;
   }
 
-  // Default to 'id' if primaryKeyField is not provided
-  const primaryKey = props.primaryKeyField || 'id';
+  // Use provided primaryKeyField or fetch from collection schema
+  let pkField = props.primaryKeyField;
+
+  // If not provided, try to get it from the collection using useCollection
+  if (!pkField) {
+    const { primaryKeyField: collectionPK } = useCollection(props.collection);
+    pkField = collectionPK?.value?.field;
+
+    if (!pkField) {
+      console.warn(
+        `[Super Layout Table] Could not determine primary key field for collection "${props.collection}". Using fallback "id" which may cause issues.`
+      );
+      pkField = 'id';
+    }
+  }
 
   for (const itemId of props.selection) {
     // Use tableApi to duplicate with translations
     await tableApi.duplicateItemWithTranslations(
       props.collection,
       itemId,
-      primaryKey,
+      pkField,
       true // include translations
     );
   }
