@@ -4,7 +4,7 @@
     v-if="!isRelational && shouldUseBooleanToggle"
     :model-value="displayValue"
     :collection="item?.collection || field?.collection"
-    :primary-key="(item?.id || item?.[primaryKeyField]) ?? ''"
+    :primary-key="(item?.[primaryKeyField] || item?.id) ?? ''"
     :field="actualFieldKey"
     :disabled="!isFieldEditableComputed"
     :readonly="!props.editMode"
@@ -25,7 +25,7 @@
     :auto-save="false"
     :saving="saving"
     :collection="item?.collection || field?.collection"
-    :primary-key-value="(item?.id || item?.[primaryKeyField]) ?? undefined"
+    :primary-key-value="(item?.[primaryKeyField] || item?.id) ?? undefined"
     :all-translations="item?.translations"
     :style="{ textAlign: props.align || 'left' }"
     :field-support-level="fieldSupportLevel"
@@ -91,6 +91,7 @@
         :value="value"
         :field="actualFieldKey"
         :item="item"
+        :primary-key-field-name="primaryKeyField"
       />
       <!-- FINAL FALLBACK: Raw value display for fields without any special handling -->
       <span v-else class="raw-value">
@@ -139,6 +140,7 @@ const props = defineProps<{
   editMode?: boolean;
   align?: 'left' | 'center' | 'right';
   directBooleanToggle?: boolean;
+  primaryKeyFieldName?: string;
 }>();
 
 const emit = defineEmits<{
@@ -165,7 +167,23 @@ onBeforeMount(() => {
 
 // Computed
 const primaryKeyField = computed(() => {
-  return Object.keys(props.item).find((key) => key === 'id' || key.endsWith('_id')) || 'id';
+  // Use the provided primaryKeyFieldName prop if available
+  if (props.primaryKeyFieldName) {
+    return props.primaryKeyFieldName;
+  }
+
+  // Fallback: Try to detect from item keys
+  const detectedKey = Object.keys(props.item).find((key) => key === 'id' || key.endsWith('_id'));
+  if (detectedKey) {
+    return detectedKey;
+  }
+
+  // Last resort fallback with warning
+  console.warn(
+    '[Super Layout Table] Could not determine primary key field for item. Using fallback "id".',
+    props.item
+  );
+  return 'id';
 });
 
 // Extract language code if present in field key
