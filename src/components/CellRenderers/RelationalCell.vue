@@ -33,6 +33,7 @@ const props = defineProps<{
   field?: string;
   item?: any;
   options?: Record<string, any>;
+  primaryKeyFieldName?: string;
 }>();
 
 const isMultiple = computed(() => Array.isArray(props.value));
@@ -66,8 +67,8 @@ function formatItem(item: any): string {
 
   // If it's an object, try to find a display field
   if (typeof item === 'object') {
-    // Common display fields in order of preference
-    const displayFields = ['name', 'title', 'label', 'first_name', 'email', 'id'];
+    // Common display fields in order of preference (without hard-coded 'id')
+    const displayFields = ['name', 'title', 'label', 'first_name', 'email'];
 
     for (const field of displayFields) {
       if (item[field] != null) {
@@ -80,16 +81,32 @@ function formatItem(item: any): string {
       return `${item.first_name} ${item.last_name}`;
     }
 
-    // Fallback to id if available
-    return item.id ? String(item.id) : 'Unknown';
+    // Try the primary key field from props
+    if (props.primaryKeyFieldName && item[props.primaryKeyFieldName] != null) {
+      return String(item[props.primaryKeyFieldName]);
+    }
+
+    // Last fallback: try 'id' field
+    if (item.id != null) {
+      return String(item.id);
+    }
+
+    return 'Unknown';
   }
 
   return String(item);
 }
 
 function getItemKey(item: any, index: number): string {
-  if (typeof item === 'object' && item?.id) {
-    return String(item.id);
+  if (typeof item === 'object') {
+    // Try primary key field from props first
+    if (props.primaryKeyFieldName && item[props.primaryKeyFieldName] != null) {
+      return String(item[props.primaryKeyFieldName]);
+    }
+    // Fallback to 'id' field
+    if (item.id != null) {
+      return String(item.id);
+    }
   }
   return `item-${index}`;
 }

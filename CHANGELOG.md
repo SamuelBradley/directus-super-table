@@ -5,7 +5,7 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.15] - 2025-10-09
+## [Unreleased]
 
 ### Added
 - Full support for Tag fields with visual tag editor (Issue #10)
@@ -35,6 +35,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated: `src/components/EditableCellRelational.vue` with tag field integration
 - Modified: `src/utils/fieldSupport.ts` with special case handling for tag fields
 - Updated: `src/constants/supportedFields.ts` with full tag interface support
+
+## [0.2.15] - 2025-10-27
+
+### Fixed
+- Fixed hardcoded 'id' primary key field assumption throughout the extension (Issue #36)
+- Extension now dynamically detects the actual primary key field from collection schema using `useCollection()` composable
+- All components and utilities now support collections with custom primary key fields (e.g., `uuid`, `custom_id`, etc.)
+
+### Changed
+- **UI Components**: Updated `super-table.vue`, `EditableCellRelational.vue`, `RelationalCell.vue`, and `actions.vue` to use dynamic primary key detection
+- **Utility Functions**: Enhanced `adjustFieldsForDisplays.ts` with `getPrimaryKeyForCollection()` helper
+- All primary key references now use fallback logic: detect from schema → fallback to 'id' with warning
+- Improved compatibility with non-standard Directus installations and custom collection schemas
 
 ## [0.2.14] - 2025-10-09
 

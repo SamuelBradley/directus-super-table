@@ -209,6 +209,7 @@
           :edit-mode="editMode"
           :align="header.align"
           :direct-boolean-toggle="(layoutOptions as any)?.directBooleanToggle"
+          :primary-key-field-name="getPrimaryKeyFieldName()"
           @update="updateFieldValue"
           @save="autoSaveEdits"
         />
@@ -343,6 +344,11 @@ const getPrimaryKeyFieldName = () => {
   if ((primaryKeyField as any)?.field) {
     return (primaryKeyField as any).field;
   }
+
+  // Log warning if we couldn't determine the primary key from schema
+  console.warn(
+    `[Super Layout Table] Could not determine primary key field for collection "${collection.value}". Using fallback "id". This may cause issues if your collection uses a different primary key.`
+  );
   return 'id';
 };
 
