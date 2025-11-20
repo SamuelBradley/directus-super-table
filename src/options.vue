@@ -16,6 +16,23 @@
       label="Enable direct boolean field editing (single-click toggle without popover)"
     />
   </div>
+
+  <div class="field">
+    <label class="type-label">Language Code Field</label>
+    <v-input v-model="languageCodeField" placeholder="languages_code">
+      <template #append>
+        <v-icon
+          v-tooltip="
+            'The field name used to identify languages in translation collections. Default: languages_code'
+          "
+          name="help"
+        />
+      </template>
+    </v-input>
+    <div class="hint">
+      Custom field name for language codes in translation collections (default: 'languages_code')
+    </div>
+  </div>
 </template>
 
 <script lang="ts" setup>
@@ -32,6 +49,7 @@ interface LayoutOptions {
   customFieldNames?: Record<string, string>;
   widths?: Record<string, number>;
   align?: Record<string, 'left' | 'center' | 'right'>;
+  languageCodeField?: string;
 }
 
 const props = defineProps<{
@@ -72,6 +90,16 @@ const directBooleanToggle = computed({
     };
   },
 });
+
+const languageCodeField = computed({
+  get: () => layoutOptions.value?.languageCodeField || 'languages_code',
+  set: (val) => {
+    layoutOptions.value = {
+      ...layoutOptions.value,
+      languageCodeField: val || undefined, // Store undefined if empty to use default
+    };
+  },
+});
 </script>
 
 <style scoped>
@@ -89,5 +117,12 @@ const directBooleanToggle = computed({
 
 .v-notice {
   margin-top: var(--form-vertical-gap);
+}
+
+.hint {
+  margin-top: 4px;
+  color: var(--foreground-subdued);
+  font-size: 12px;
+  line-height: 1.4;
 }
 </style>

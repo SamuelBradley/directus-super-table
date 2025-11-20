@@ -210,6 +210,7 @@
           :align="header.align"
           :direct-boolean-toggle="(layoutOptions as any)?.directBooleanToggle"
           :primary-key-field-name="getPrimaryKeyFieldName()"
+          :language-code-field="translationConfig.languageCodeField"
           @update="updateFieldValue"
           @save="autoSaveEdits"
         />
@@ -286,6 +287,10 @@ import { useTableEdits } from './composables/useTableEdits';
 import { useTablePagination } from './composables/useTablePagination';
 import { useTableFields } from './composables/useTableFields';
 import { useFilterPresets } from './composables/useFilterPresets';
+import {
+  useTranslationConfig,
+  getTranslationLanguageFieldPath,
+} from './composables/useTranslationConfig';
 import { PER_PAGE_OPTIONS } from './constants/pagination';
 import { DEFAULT_LANGUAGES } from './constants/languages';
 import EditableCellRelational from './components/EditableCellRelational.vue';
@@ -399,6 +404,9 @@ const hasTranslationFields = computed(() => {
   return fields.value.some((field: string) => field.startsWith('translations.'));
 });
 
+// Translation configuration
+const translationConfig = useTranslationConfig(layoutOptions);
+
 // Layout Options
 const showToolbar = computed(() => layoutOptions.value?.showToolbar !== false);
 // Default to true for filters
@@ -482,9 +490,10 @@ const fieldsWithRelational = computed(() => {
     adjustedFields.unshift(pkField); // Add at the beginning
   }
 
-  // Ensure languages_code is included for translations
-  if (hasTranslationFields.value && !adjustedFields.includes('translations.languages_code')) {
-    adjustedFields.push('translations.languages_code');
+  // Ensure language code field is included for translations
+  const languageFieldPath = getTranslationLanguageFieldPath(translationConfig.value);
+  if (hasTranslationFields.value && !adjustedFields.includes(languageFieldPath)) {
+    adjustedFields.push(languageFieldPath);
   }
 
   return adjustedFields;
@@ -1046,7 +1055,8 @@ const { edits, savingCells, updateFieldValue, autoSaveEdits } = useTableEdits(
   collection,
   computed(() => primaryKeyField?.value || (primaryKeyField as any) || undefined),
   items,
-  getItems
+  getItems,
+  translationConfig.value.languageCodeField
 );
 
 // Field management

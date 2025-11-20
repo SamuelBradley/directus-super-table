@@ -7,7 +7,8 @@ export function useTableEdits(
   collection: Ref<string>,
   primaryKeyField: Ref<Field | undefined>,
   items: Ref<any[]>,
-  getItems: () => Promise<void>
+  getItems: () => Promise<void>,
+  languageCodeField = 'languages_code'
 ) {
   const tableApi = useTableApi();
   const edits = ref<Edits>({});
@@ -55,13 +56,13 @@ export function useTableEdits(
             // Build translation update structure
             const existingTranslations = item.translations || [];
             const translationForLang = existingTranslations.find(
-              (t: any) => t.languages_code === value.language
+              (t: any) => t[languageCodeField] === value.language
             );
 
             if (translationForLang) {
               // Update existing translation
               updatePayload.translations = existingTranslations.map((t: any) => {
-                if (t.languages_code === value.language) {
+                if (t[languageCodeField] === value.language) {
                   return {
                     ...t,
                     [value.translationField]: value.value,
@@ -74,7 +75,7 @@ export function useTableEdits(
               updatePayload.translations = [
                 ...existingTranslations,
                 {
-                  languages_code: value.language,
+                  [languageCodeField]: value.language,
                   [value.translationField]: value.value,
                 },
               ];
@@ -90,12 +91,18 @@ export function useTableEdits(
       for (const [field, value] of Object.entries(updatePayload)) {
         if (field === 'translations') {
           // For full translations update
-          await tableApi.updateItem(collection.value, itemId, 'translations', {
-            isFullTranslations: true,
-            translations: value,
-          });
+          await tableApi.updateItem(
+            collection.value,
+            itemId,
+            'translations',
+            {
+              isFullTranslations: true,
+              translations: value,
+            },
+            languageCodeField
+          );
         } else {
-          await tableApi.updateItem(collection.value, itemId, field, value);
+          await tableApi.updateItem(collection.value, itemId, field, value, languageCodeField);
         }
       }
 
