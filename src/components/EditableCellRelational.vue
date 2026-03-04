@@ -1,7 +1,41 @@
 <template>
+  <!-- Use InlineEditPopover with TagCell for tag fields -->
+  <InlineEditPopover
+    v-if="!isRelational && shouldUseTagCell"
+    :value="displayValue"
+    :field-key="actualFieldKey"
+    :field-label="field?.name || actualFieldKey"
+    :field-type="field?.type"
+    :interface-type="'tags'"
+    :interface-options="interfaceOptions"
+    :is-editable="isFieldEditableComputed"
+    :is-relational="false"
+    :auto-save="false"
+    :saving="saving"
+    :collection="item?.collection || field?.collection"
+    :primary-key-value="(item?.id || item?.[primaryKeyField]) ?? undefined"
+    :style="{ textAlign: props.align || 'left' }"
+    :field-support-level="fieldSupportLevel"
+    :edit-mode-active="props.editMode"
+    :field-edit-warning="fieldEditWarning"
+    @update:value="handleUpdate"
+    @save="handleSave"
+    @next-field="navigateToNextCell"
+    @prev-field="navigateToPrevCell"
+  >
+    <template #display="{ value }">
+      <TagCell
+        :value="value"
+        :item="item"
+        :field="actualFieldKey"
+        :edit-mode="props.editMode"
+        :alignment="props.align"
+      />
+    </template>
+  </InlineEditPopover>
   <!-- Use BooleanToggleCell for boolean fields when directBooleanToggle is enabled -->
   <BooleanToggleCell
-    v-if="!isRelational && shouldUseBooleanToggle"
+    v-else-if="!isRelational && shouldUseBooleanToggle"
     :model-value="displayValue"
     :collection="item?.collection || field?.collection"
     :primary-key="(item?.[primaryKeyField] || item?.id) ?? ''"
@@ -128,6 +162,7 @@ import SelectCell from './CellRenderers/SelectCell.vue';
 import ImageCell from './CellRenderers/ImageCell.vue';
 import RelationalCell from './CellRenderers/RelationalCell.vue';
 import ColorCell from './CellRenderers/ColorCell.vue';
+import TagCell from './TagCell.vue';
 import { isFieldEditable, getFieldEditWarning, getFieldSupportLevel } from '../utils/fieldSupport';
 
 const props = defineProps<{
@@ -308,6 +343,55 @@ const fieldEditWarning = computed(() => {
 // Get field support level for UI display
 const fieldSupportLevel = computed(() => {
   return getFieldSupportLevel(props.field, actualFieldKey.value);
+});
+
+// Check if we should use TagCell for tag fields
+const shouldUseTagCell = computed(() => {
+  if (!props.field) return false;
+
+  // Primary check: Field has 'tags' interface
+  const interfaceType = props.field.interface || props.field.meta?.interface;
+  if (interfaceType === 'tags') {
+    return true; // Always use TagCell for explicit tag fields
+  }
+
+  // Secondary check: JSON field with string array content (legacy support)
+  if (props.field.type === 'json' && props.editMode) {
+    const value = displayValue.value;
+
+    // Check if value is a string array (tags)
+    if (Array.isArray(value)) {
+      // All items must be strings and non-empty
+      return (
+        value.length === 0 ||
+        value.every((item) => typeof item === 'string' && item.trim().length > 0)
+      );
+    }
+
+    // Check if it's a JSON string that parses to a string array
+    if (typeof value === 'string' && value.trim()) {
+      try {
+        const parsed = JSON.parse(value);
+        return (
+          Array.isArray(parsed) &&
+          (parsed.length === 0 ||
+            parsed.every((item) => typeof item === 'string' && item.trim().length > 0))
+        );
+      } catch {
+        return false;
+      }
+    }
+
+    // Empty/null values in JSON fields could be tags if field name suggests it
+    if ((value === null || value === undefined || value === '') && actualFieldKey.value) {
+      const fieldName = actualFieldKey.value.toLowerCase();
+      return (
+        fieldName.includes('tag') || fieldName.includes('label') || fieldName.includes('keyword')
+      );
+    }
+  }
+
+  return false;
 });
 
 // Check if we should use BooleanToggleCell

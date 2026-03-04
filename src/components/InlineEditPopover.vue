@@ -41,17 +41,11 @@
             </template>
           </div>
 
-          <!-- Edit Indicator Icon - show lock or edit icon, but only in edit mode -->
+          <!-- Lock icon for non-editable fields in edit mode -->
           <v-icon
             v-if="!active && !saving && shouldShowIcon()"
             :name="getFieldIcon()"
-            class="edit-icon"
-            :class="{
-              'lock-icon':
-                fieldSupportLevel === 'none' ||
-                fieldSupportLevel === 'readonly' ||
-                fieldSupportLevel === 'partial',
-            }"
+            class="lock-icon"
             x-small
           />
         </div>
@@ -172,6 +166,17 @@
               <v-progress-circular indeterminate />
               <span>Opening file browser...</span>
             </div>
+          </div>
+
+          <!-- Tag Editor -->
+          <div v-else-if="interfaceType === 'tags' || interfaceType === 'tag-list'">
+            <TagEditor
+              :value="localValue"
+              :suggestions="getTagSuggestions()"
+              @update:value="handleTagChange"
+              @save="handleTagSave"
+              @cancel="cancelEdit"
+            />
           </div>
 
           <!-- JSON/Code Editor for JSON fields -->
@@ -400,6 +405,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useTableApi } from '../composables/api';
+import TagEditor from './CellRenderers/TagEditor.vue';
 // Note: useDrawer might not be available in all versions, we'll use alternative approach
 
 interface Props {
@@ -643,27 +649,20 @@ function getFieldTooltip() {
 }
 
 function shouldShowIcon() {
-  // Only show icons when edit mode is active globally
+  // Only show lock icons when edit mode is active and field is not editable
   if (!props.editModeActive) {
     return false;
   }
-
-  // In edit mode, show appropriate icons
-  return true;
+  // Only show icon for non-editable fields (lock indicator)
+  return (
+    props.fieldSupportLevel === 'none' ||
+    props.fieldSupportLevel === 'readonly' ||
+    props.fieldSupportLevel === 'partial'
+  );
 }
 
 function getFieldIcon() {
-  if (
-    props.fieldSupportLevel === 'partial' ||
-    props.fieldSupportLevel === 'none' ||
-    props.fieldSupportLevel === 'readonly'
-  ) {
-    return 'lock'; // Lock for all non-editable fields
-  }
-  if (props.isEditable && !props.isRelational) {
-    return 'edit'; // Edit pencil for fully supported
-  }
-  return 'lock'; // Default to lock
+  return 'lock';
 }
 
 function handleCellClick(toggle: Function) {
@@ -798,6 +797,26 @@ function handleDateTimeChange(value: any) {
   if (props.autoSave) {
     debouncedSave(value);
   }
+}
+
+function handleTagChange(tags: string[]) {
+  localValue.value = tags;
+  hasUnsavedChanges.value = true;
+
+  if (props.autoSave) {
+    debouncedSave(tags);
+  }
+}
+
+function handleTagSave(tags: string[]) {
+  localValue.value = tags;
+  saveAndClose();
+}
+
+function getTagSuggestions(): string[] {
+  // TODO: Could be enhanced to fetch suggestions from other records
+  // For now, return empty array
+  return [];
 }
 
 function handleJsonInput(value: string) {
@@ -1121,7 +1140,6 @@ onUnmounted(() => {
   height: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   cursor: default;
   transition: all var(--fast) var(--transition);
   border-radius: var(--border-radius);
@@ -1157,23 +1175,19 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 100%;
+  width: 100%;
 }
 
-.edit-icon {
-  opacity: 0;
-  transition: opacity var(--fast) var(--transition);
-  margin-left: 8px;
+.lock-icon {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
   color: var(--foreground-subdued);
-  flex-shrink: 0;
-}
-
-.edit-cell.is-editable:hover .edit-icon {
   opacity: 0.6;
-}
-
-.edit-cell.is-editable:focus .edit-icon {
-  opacity: 1;
+  flex-shrink: 0;
+  z-index: 1;
+  pointer-events: none;
 }
 
 .edit-cell.non-editable {
@@ -1642,12 +1656,6 @@ onUnmounted(() => {
 .edit-cell.field-readonly:hover,
 .edit-cell.field-partial:hover {
   background-color: var(--background-subdued);
-}
-
-/* Lock icon styling */
-.edit-icon.lock-icon {
-  color: var(--foreground-subdued);
-  opacity: 0.6;
 }
 
 /* Override cursor for non-editable cells - NUR im Edit-Mode */

@@ -44,6 +44,7 @@ Duplicate items with all their relationships and translations. Perfect for creat
 - **Custom Cell Rendering** - Specialized display for different field types
 - **Relationship Support** - Handle M2O, O2M, M2M, M2A relationships with deep data access
 - **Image Preview** - Inline image display with lightbox support and file browser
+- **Tag Support** - Automatic detection and display of tag fields as visual chips with inline popover editor for adding/removing tags
 - **Status Indicators** - Visual representation of boolean and select fields
 - **Translation Support** - Display multiple language translations as separate columns
 - **Column Alignment** - Configurable text alignment per column (left, center, right)

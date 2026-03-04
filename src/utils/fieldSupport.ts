@@ -40,6 +40,12 @@ export function isFieldEditable(field: Field | null, fieldKey?: string): boolean
   // Check interface support FIRST for special cases
   const interfaceType = field.meta?.interface || field.interface;
 
+  // Special case: TAG fields with JSON type are fully supported
+  // Tags interface provides complete editing functionality for JSON arrays
+  if (interfaceType === 'tags') {
+    return true; // Tags are fully supported regardless of underlying JSON type
+  }
+
   // Special case: IMAGE fields with UUID type are fully supported
   // Note: Only image files, not general files!
   if (interfaceType === 'file-image' || interfaceType === 'image') {
@@ -149,8 +155,6 @@ export function getFieldEditWarning(field: Field | null, fieldKey?: string): str
   if (interfaceSupported === 'partial') {
     // Provide specific messages for known partial support cases
     switch (interfaceType) {
-      case 'tags':
-        return 'Tag fields have limited support (Issue #10). Complex tag operations should be done in detail view.';
       case 'files':
         return 'Multiple file fields have limited support. Use the detail view for managing multiple files.';
       default:
@@ -190,6 +194,11 @@ export function getFieldSupportLevel(field: Field | null, fieldKey?: string): Fi
   }
 
   const interfaceType = field.meta?.interface || field.interface;
+
+  // Special case: TAG fields are fully supported (regardless of JSON type)
+  if (interfaceType === 'tags') {
+    return 'full';
+  }
 
   // Special case: IMAGE fields are fully supported (not general files!)
   if (interfaceType === 'file-image' || interfaceType === 'image') {

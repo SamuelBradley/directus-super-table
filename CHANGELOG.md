@@ -5,6 +5,39 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Full support for Tag fields with visual tag editor (Issue #10)
+- TagCell component for visual tag display as chips in table cells
+- TagEditor component with popover-based editing interface
+- Native Directus v-chip integration for tag display and editing
+- Tag detection for both explicit 'tags' interface and JSON array fields
+- Enhanced field support system for tag fields
+- Popover-based tag editing with Add/Remove functionality
+
+### Changed
+- Updated supportedFields.ts: 'tags' interface now fully supported (was 'partial')
+- Enhanced InlineEditPopover.vue with dedicated tag editing interface
+- Improved field support detection for tag fields regardless of JSON type
+- Removed edit pencil icon from editable cells (hover background is sufficient indicator)
+- Edit-icon for non-editable fields (lock) now uses overlay positioning to save cell space
+- Tag chips in editor now show pointer cursor and translated "Remove" tooltip on hover
+
+### Fixed
+- Tag fields are now properly recognized as editable in table view
+- Resolved field support level detection for tag interface with JSON type
+- Tag fields no longer show "limited support" warnings
+- Fixed tag chips being clipped in narrow columns due to edit icon taking inline space
+
+### Technical Details
+- New component: `src/components/TagCell.vue` (display-only component)
+- New component: `src/components/CellRenderers/TagEditor.vue` (popover editor)
+- Enhanced: `src/components/InlineEditPopover.vue` with tag interface support
+- Updated: `src/components/EditableCellRelational.vue` with tag field integration
+- Modified: `src/utils/fieldSupport.ts` with special case handling for tag fields
+- Updated: `src/constants/supportedFields.ts` with full tag interface support
+
 ## [0.2.16] - 2025-11-20
 
 ### Added
