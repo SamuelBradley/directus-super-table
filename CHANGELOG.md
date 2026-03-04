@@ -20,13 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated supportedFields.ts: 'tags' interface now fully supported (was 'partial')
 - Enhanced InlineEditPopover.vue with dedicated tag editing interface
 - Improved field support detection for tag fields regardless of JSON type
-- Tag fields now display with proper edit icons instead of lock icons
+- Removed edit pencil icon from editable cells (hover background is sufficient indicator)
+- Edit-icon for non-editable fields (lock) now uses overlay positioning to save cell space
+- Tag chips in editor now show pointer cursor and translated "Remove" tooltip on hover
 
 ### Fixed
 - Tag fields are now properly recognized as editable in table view
 - Resolved field support level detection for tag interface with JSON type
 - Tag fields no longer show "limited support" warnings
-- Fixed edit icon display for tag fields (removed incorrect lock icon)
+- Fixed tag chips being clipped in narrow columns due to edit icon taking inline space
 
 ### Technical Details
 - New component: `src/components/TagCell.vue` (display-only component)
