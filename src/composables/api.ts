@@ -101,12 +101,13 @@ export function useTableApi() {
     collection: string,
     primaryKey: string | number,
     field: string,
-    value: any
+    value: any,
+    languageCodeField = 'languages_code'
   ): Promise<void> {
     try {
       // Handle translation updates specially
       if (typeof value === 'object' && value?.isTranslation) {
-        await updateTranslation(collection, primaryKey, value);
+        await updateTranslation(collection, primaryKey, value, languageCodeField);
       } else if (typeof value === 'object' && value?.isFullTranslations) {
         // Handle full translations update from interface-translations
         await api.patch(`/items/${collection}/${primaryKey}`, {
@@ -131,7 +132,8 @@ export function useTableApi() {
   async function updateTranslation(
     collection: string,
     primaryKey: string | number,
-    translationData: any
+    translationData: any,
+    languageCodeField = 'languages_code'
   ): Promise<void> {
     // Get current item with translations
     const currentItem = await api.get(`/items/${collection}/${primaryKey}`, {
@@ -144,7 +146,7 @@ export function useTableApi() {
 
     // Find or create translation for the language
     const translationIndex = existingTranslations.findIndex(
-      (t: any) => t.languages_code === translationData.language
+      (t: any) => t[languageCodeField] === translationData.language
     );
 
     if (translationIndex >= 0) {
@@ -154,7 +156,7 @@ export function useTableApi() {
     } else {
       // Create new translation
       existingTranslations.push({
-        languages_code: translationData.language,
+        [languageCodeField]: translationData.language,
         [translationData.translationField]: translationData.value,
       });
     }

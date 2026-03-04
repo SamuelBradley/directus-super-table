@@ -25,6 +25,7 @@ export interface LayoutOptions {
   directBooleanToggle?: boolean;
   quickFilters?: QuickFilter[];
   activeQuickFilterId?: string;
+  languageCodeField?: string; // Custom field name for language codes (default: 'languages_code')
 }
 
 export interface LayoutQuery {

@@ -426,6 +426,7 @@ interface Props {
   fieldSupportLevel?: 'full' | 'partial' | 'none' | 'readonly';
   editModeActive?: boolean;
   fieldEditWarning?: string;
+  languageCodeField?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -695,8 +696,9 @@ function formatDisplayValue(value: any): string {
   if (Array.isArray(value)) {
     if (value.length === 0) return '[]';
     // For translations array, show language codes
-    if (value[0]?.languages_code) {
-      const langs = value.map((t) => t.languages_code).join(', ');
+    const languageField = props.languageCodeField || 'languages_code';
+    if (value[0]?.[languageField]) {
+      const langs = value.map((t) => t[languageField]).join(', ');
       return `[${value.length}] ${langs}`;
     }
     return `[${value.length} items]`;

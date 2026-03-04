@@ -38,6 +38,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Modified: `src/utils/fieldSupport.ts` with special case handling for tag fields
 - Updated: `src/constants/supportedFields.ts` with full tag interface support
 
+## [0.2.16] - 2025-11-20
+
+### Added
+- Added configurable language code field support for translation collections (Issue #39)
+- New `languageCodeField` layout option to specify custom field names instead of hardcoded 'languages_code'
+- UI field in options panel to configure the language code field name
+
+### Fixed
+- Fixed layout crash when translation collection uses a custom language code field name
+- Extension now supports any field name for language identification in translations
+
+### Changed
+- Refactored all components to use configurable language code field via `useTranslationConfig` composable
+- Updated `super-table.vue`, `api.ts`, `useTableEdits.ts`, `EditableCellRelational.vue`, and `InlineEditPopover.vue`
+- Maintains backward compatibility with default 'languages_code' field name
+
 ## [0.2.15] - 2025-10-27
 
 ### Fixed

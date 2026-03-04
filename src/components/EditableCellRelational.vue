@@ -57,6 +57,7 @@
     :is-editable="isFieldEditableComputed"
     :is-relational="false"
     :auto-save="false"
+    :language-code-field="props.languageCodeField"
     :saving="saving"
     :collection="item?.collection || field?.collection"
     :primary-key-value="(item?.[primaryKeyField] || item?.id) ?? undefined"
@@ -176,6 +177,7 @@ const props = defineProps<{
   align?: 'left' | 'center' | 'right';
   directBooleanToggle?: boolean;
   primaryKeyFieldName?: string;
+  languageCodeField?: string;
 }>();
 
 const emit = defineEmits<{
@@ -253,8 +255,9 @@ const displayValue = computed(() => {
       const targetLanguage = fieldLanguage.value;
 
       if (targetLanguage) {
+        const languageField = props.languageCodeField || 'languages_code';
         const translation = props.item.translations.find(
-          (t: any) => t.languages_code === targetLanguage
+          (t: any) => t[languageField] === targetLanguage
         );
 
         // Return the specific field value if translation exists
