@@ -97,7 +97,7 @@ function formatItem(item: any): string {
   return String(item);
 }
 
-function getItemKey(item: any, index: number): string {
+function getItemKey(item: any, index: string | number): string {
   if (typeof item === 'object') {
     // Try primary key field from props first
     if (props.primaryKeyFieldName && item[props.primaryKeyFieldName] != null) {
