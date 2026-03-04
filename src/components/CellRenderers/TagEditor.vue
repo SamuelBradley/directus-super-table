@@ -20,8 +20,9 @@
       <v-chip
         v-for="(tag, index) in localTags"
         :key="`${tag}-${index}`"
+        v-tooltip="t('remove')"
         x-small
-        class="tag-chip-native"
+        class="tag-chip-native tag-removable"
         @click="removeTag(index)"
       >
         {{ tag }}
@@ -60,6 +61,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 interface Props {
   value: string[] | string | null;
@@ -77,6 +79,8 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<Emits>();
+
+const { t } = useI18n();
 
 // State
 const localTags = ref<string[]>([]);
@@ -209,6 +213,10 @@ function removeTag(index: number) {
   --v-chip-color: white;
   --v-chip-background-color: var(--theme--primary);
   margin: 2px;
+}
+
+.tag-removable {
+  cursor: pointer;
 }
 
 .tag-editor .v-chip:hover {
