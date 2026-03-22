@@ -26,6 +26,20 @@
       <v-icon name="bookmark_add" />
     </v-button>
 
+    <v-button
+      v-if="currentBookmarkId"
+      v-tooltip.bottom="updateBookmarkTooltip"
+      :loading="savingBookmark"
+      :disabled="savingBookmark"
+      icon
+      rounded
+      secondary
+      class="update-bookmark-button"
+      @click="updateCurrentBookmark"
+    >
+      <v-icon name="bookmark_added" />
+    </v-button>
+
     <!-- Save Filter Dialog -->
     <v-dialog
       v-if="saveDialogActive"
@@ -93,10 +107,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useStores, useCollection } from '@directus/extensions-sdk';
 import { useI18n } from 'vue-i18n';
+import { useRoute } from 'vue-router';
 import { useTableApi } from './composables/api';
+
+const LAYOUT_ID = 'super-layout-table';
 
 // Props from layout state
 const props = defineProps<{
@@ -116,14 +133,17 @@ const emit = defineEmits(['update:layoutOptions']);
 // Composables
 const { t } = useI18n();
 const tableApi = useTableApi();
+const route = useRoute();
 const { useNotificationsStore } = useStores();
 const notificationsStore = useNotificationsStore();
 
 // State for Save Filter Dialog
 const saveDialogActive = ref(false);
+const savingBookmark = ref(false);
 const filterName = ref('');
 const filterIcon = ref('filter_list');
 const filterColor = ref('primary');
+const latestLayoutOptions = ref(props.layoutOptions || {});
 
 // Color options for filter buttons
 const colorOptions = [
@@ -136,6 +156,26 @@ const colorOptions = [
 ];
 
 const hasSelection = computed(() => props.selection && props.selection.length > 0);
+const currentBookmarkId = computed(() => {
+  const bookmark = route.query.bookmark;
+  if (Array.isArray(bookmark)) return bookmark[0] || null;
+  return typeof bookmark === 'string' && bookmark.length > 0 ? bookmark : null;
+});
+
+const updateBookmarkTooltip = computed(() => {
+  return currentBookmarkId.value
+    ? 'Update current bookmark with this view state'
+    : 'No active bookmark to update';
+});
+
+watch(
+  () => props.layoutOptions,
+  (value) => {
+    latestLayoutOptions.value = value || {};
+  },
+  { immediate: true, deep: true }
+);
+
 const hasNativeFilter = computed(() => {
   // Check if filter exists and has actual filter conditions
   if (!props.filter || typeof props.filter !== 'object') {
@@ -256,6 +296,51 @@ function openSaveFilterDialog() {
   saveDialogActive.value = true;
 }
 
+async function updateCurrentBookmark() {
+  if (!currentBookmarkId.value) return;
+
+  savingBookmark.value = true;
+
+  try {
+    const existingPreset = await tableApi.fetchPreset(currentBookmarkId.value);
+
+    const updatedPreset = {
+      collection: props.collection,
+      layout: LAYOUT_ID,
+      filter: props.filter || null,
+      search: props.search || null,
+      layout_query: {
+        ...(existingPreset?.layout_query || {}),
+        [LAYOUT_ID]: props.layoutQuery || {},
+      },
+      layout_options: {
+        ...(existingPreset?.layout_options || {}),
+        [LAYOUT_ID]: latestLayoutOptions.value || {},
+      },
+    };
+
+    await tableApi.updatePreset(currentBookmarkId.value, updatedPreset);
+
+    notificationsStore.add({
+      title: 'Bookmark updated',
+      text: 'The active bookmark now includes the current table state.',
+      type: 'success',
+    });
+  } catch (error: any) {
+    const status = error?.response?.status;
+    notificationsStore.add({
+      title: 'Bookmark update failed',
+      text:
+        status === 403
+          ? 'You do not have permission to update this bookmark.'
+          : error?.message || 'Failed to update the active bookmark.',
+      type: 'warning',
+    });
+  } finally {
+    savingBookmark.value = false;
+  }
+}
+
 async function saveFilter() {
   if (!filterName.value || !props.filter) return;
 
@@ -280,6 +365,8 @@ async function saveFilter() {
       quickFilters: [...currentFilters, newPreset],
       activeQuickFilterId: newFilterId, // Activate immediately
     };
+
+    latestLayoutOptions.value = updatedOptions;
 
     // Emit the update to save in layoutOptions
     emit('update:layoutOptions', updatedOptions);
@@ -407,6 +494,18 @@ async function duplicateSelectedItems() {
 
 .save-filter-button:hover {
   border-color: var(--primary-75);
+}
+
+.update-bookmark-button {
+  --v-button-background-color: var(--success-25);
+  --v-button-background-color-hover: var(--success-50);
+  --v-button-color: var(--success);
+  --v-button-color-hover: var(--success-125);
+  border: 1px solid var(--success-50);
+}
+
+.update-bookmark-button:hover {
+  border-color: var(--success-75);
 }
 
 /* Verbindungslinie vom Button zum Filter */

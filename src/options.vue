@@ -5,6 +5,12 @@
   </div>
 
   <div class="field">
+    <label class="type-label">Row Spacing</label>
+    <v-select v-model="spacing" :items="spacingOptions" />
+    <div class="hint">Controls the default row height for non-image tables.</div>
+  </div>
+
+  <div class="field">
     <label class="type-label">Edit Mode</label>
     <v-checkbox v-model="editMode" label="Enable inline editing" />
   </div>
@@ -58,6 +64,8 @@ const props = defineProps<{
 
 const emit = defineEmits(['update:layoutOptions']);
 
+const spacingOptions = ['compact', 'cozy', 'comfortable'];
+
 const layoutOptions = useSync(props, 'layoutOptions', emit);
 
 // General Settings
@@ -67,6 +75,16 @@ const showToolbar = computed({
     layoutOptions.value = {
       ...layoutOptions.value,
       showToolbar: val,
+    };
+  },
+});
+
+const spacing = computed({
+  get: () => layoutOptions.value?.spacing || 'compact',
+  set: (val: LayoutOptions['spacing']) => {
+    layoutOptions.value = {
+      ...layoutOptions.value,
+      spacing: val || 'compact',
     };
   },
 });

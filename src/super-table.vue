@@ -674,7 +674,16 @@ const hasImageFields = computed(() => {
 // Row height - dynamic for image fields, fixed for others
 const tableRowHeight = computed(() => {
   // If we have image fields, let rows adjust to content
-  return hasImageFields.value ? null : 48;
+  if (hasImageFields.value) return null;
+
+  const spacing = layoutOptions.value?.spacing || 'compact';
+  const rowHeights = {
+    compact: 29,
+    cozy: 43,
+    comfortable: 58,
+  } as const;
+
+  return rowHeights[spacing];
 });
 
 // Edit Mode - use from layoutOptions for persistence
@@ -691,6 +700,7 @@ const editMode = computed({
 // Search
 const searchQuery = ref(search?.value || '');
 const onSearchInput = debounce((val: string) => {
+  page.value = 1;
   emit('update:search', val);
 }, 300);
 

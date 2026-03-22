@@ -259,6 +259,32 @@ export function useTableApi() {
   }
 
   /**
+   * Fetch a single preset/bookmark
+   */
+  async function fetchPreset(presetId: string | number): Promise<any> {
+    try {
+      const response = await api.get(`/presets/${presetId}`);
+      return response.data?.data;
+    } catch (err) {
+      error.value = err as Error;
+      throw err;
+    }
+  }
+
+  /**
+   * Update an existing preset/bookmark
+   */
+  async function updatePreset(presetId: string | number, updates: any): Promise<any> {
+    try {
+      const response = await api.patch(`/presets/${presetId}`, updates);
+      return response.data?.data;
+    } catch (err) {
+      error.value = err as Error;
+      throw err;
+    }
+  }
+
+  /**
    * Fetch available languages
    */
   async function fetchLanguages(): Promise<any[]> {
@@ -521,6 +547,8 @@ export function useTableApi() {
     duplicateItemWithTranslations,
     exportItems,
     savePreset,
+    fetchPreset,
+    updatePreset,
     fetchLanguages,
     fetchFile,
     fetchFiles,
