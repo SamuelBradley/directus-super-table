@@ -101,9 +101,12 @@
         :field="actualFieldKey"
         :alignment="align"
       />
+      <span v-else-if="field?.display === 'user'" class="raw-value">
+        {{ formatUserDisplay(value) }}
+      </span>
       <!-- ABSOLUTE PRIORITY: User-configured display templates (ALL field types) -->
       <render-display
-        v-if="field?.display"
+        v-else-if="field?.display"
         :value="value"
         :display="field?.display"
         :options="field?.displayOptions"
@@ -501,6 +504,26 @@ function renderTemplate(value: any, template: string): string {
 
   // Handle simple values - replace all template vars with the same value
   return template.replace(/\{\{.*?\}\}/g, String(value));
+}
+
+function formatUserDisplay(value: any): string {
+  if (!value) return 'Unknown User';
+
+  if (typeof value === 'string' || typeof value === 'number') {
+    return String(value);
+  }
+
+  if (typeof value === 'object') {
+    const firstName = typeof value.first_name === 'string' ? value.first_name.trim() : '';
+    const lastName = typeof value.last_name === 'string' ? value.last_name.trim() : '';
+    const fullName = `${firstName} ${lastName}`.trim();
+
+    if (fullName) return fullName;
+    if (typeof value.email === 'string' && value.email.trim()) return value.email.trim();
+    if (value.id != null) return String(value.id);
+  }
+
+  return 'Unknown User';
 }
 
 function handleUpdate(value: any) {

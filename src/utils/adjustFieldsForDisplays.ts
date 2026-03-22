@@ -216,6 +216,10 @@ export function adjustFieldsForDisplays(
               // Avatar references directus_files
               const avatarPkField = getPrimaryKeyForCollection('directus_files');
               displayFields.push(`${fieldKey}.avatar.${avatarPkField}`);
+
+              if (fieldExists('directus_files', 'modified_on', fieldsStore)) {
+                displayFields.push(`${fieldKey}.avatar.modified_on`);
+              }
             }
             break;
           }
