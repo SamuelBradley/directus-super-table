@@ -694,6 +694,36 @@ const onSearchInput = debounce((val: string) => {
   emit('update:search', val);
 }, 300);
 
+function buildNestedFieldCondition(fieldPath: string, operator: string, value: unknown) {
+  const terminalCondition = { [operator]: value };
+
+  return fieldPath
+    .split('.')
+    .reduceRight<Record<string, unknown>>((acc, part) => ({ [part]: acc }), terminalCondition);
+}
+
+function getFieldMetadataForPath(fieldPath: string): Field | null {
+  const parts = fieldPath.split('.');
+  let currentCollection = collection.value;
+
+  for (let index = 0; index < parts.length; index++) {
+    const part = parts[index];
+    const field = fieldsStore.getField(currentCollection, part);
+
+    if (!field) return null;
+    if (index === parts.length - 1) return field;
+
+    const relations = relationsStore.getRelationsForField(currentCollection, part);
+    const relation = relations?.[0];
+    const relatedCollection = relation?.related_collection || relation?.collection;
+
+    if (!relatedCollection || relatedCollection === currentCollection) return null;
+    currentCollection = relatedCollection;
+  }
+
+  return null;
+}
+
 // Build search filter for all fields including translations
 function buildSearchFilter(query: string) {
   if (!query || query.trim() === '') return null;
@@ -748,12 +778,18 @@ function buildSearchFilter(query: string) {
           },
         });
       } else {
-        // Other relational fields
-        conditions.push({
-          [actualFieldKey]: {
-            _icontains: searchValue,
-          },
-        });
+        const nestedField = getFieldMetadataForPath(actualFieldKey);
+        const searchableTypes = ['string', 'text'];
+
+        if (nestedField && searchableTypes.includes(nestedField.type)) {
+          conditions.push(buildNestedFieldCondition(actualFieldKey, '_icontains', searchValue));
+        } else if (nestedField && nestedField.type === 'uuid' && searchIsUUID) {
+          conditions.push(buildNestedFieldCondition(actualFieldKey, '_eq', searchValue));
+        } else if (nestedField && nestedField.type === 'integer' && searchIsInteger) {
+          conditions.push(buildNestedFieldCondition(actualFieldKey, '_eq', searchAsInteger));
+        } else {
+          conditions.push(buildNestedFieldCondition(actualFieldKey, '_icontains', searchValue));
+        }
       }
     } else {
       // Direct fields - check if it's a searchable type
