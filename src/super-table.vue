@@ -1422,9 +1422,7 @@ onUnmounted(() => {
 
 /* Row height - controlled by content */
 .table :deep(tbody tr) {
-  /* Standard height, but can grow if needed */
-  min-height: 48px;
-  /* Remove any forced height */
+  min-height: 0;
 }
 
 .table :deep(tbody td) {
@@ -1437,7 +1435,7 @@ onUnmounted(() => {
 /* Allow edit cells to fill their container */
 .table :deep(.edit-cell) {
   height: 100%;
-  min-height: 36px;
+  min-height: 0;
 }
 
 /* Force ALL cell content to be vertically centered */
@@ -1445,7 +1443,7 @@ onUnmounted(() => {
   display: flex !important;
   align-items: center !important;
   justify-content: inherit !important;
-  min-height: 32px;
+  min-height: 0;
   height: 100%;
 }
 
