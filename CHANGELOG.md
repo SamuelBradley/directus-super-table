@@ -5,6 +5,59 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.18] - 2026-04-04
+
+### Changed
+- Updated all 28 dependencies to latest versions (Issue #45)
+- Aligned dependency versions with expandable-blocks (v1.3.4) and expandable-blocks-api (v0.3.0)
+
+### Security
+- Resolved 1 CRITICAL vulnerability (happy-dom RCE via VM Context Escape)
+- Resolved 5 HIGH vulnerabilities in direct dependencies (playwright SSL bypass, axios SSRF, rollup XSS/path traversal, glob command injection)
+- Reduced total vulnerabilities from 10 to 4 (remaining are transitive SDK dependencies)
+
+### Updated Dependencies
+
+#### Production
+- `lodash` 4.17.21 → 4.18.1
+- `@directus/format-title` 12.0.1 → 12.1.2
+
+#### Dev — Major Updates
+- `@directus/extensions-sdk` 11.0.10 → 17.1.1
+- `@directus/types` 13.2.2 → 15.0.1
+- `typescript` 5.x → 6.0.2
+- `eslint` 9.x → 10.2.0
+- `@eslint/js` 9.x → 10.0.1
+- `vitest` 3.2.4 → 4.1.2
+- `@vitest/coverage-v8` 3.2.4 → 4.1.2
+- `@vitest/ui` 3.2.4 → 4.1.2
+- `happy-dom` 18.0.1 → 20.8.9
+- `jsdom` 26.1.0 → 29.0.1
+- `vue-router` 4.5.1 → 5.0.4
+- `vite` added as direct dependency (8.0.3) for Vitest 4 peer requirement
+
+#### Dev — Minor/Patch Updates
+- `@directus/utils` 13.0.9 → 13.4.0
+- `@typescript-eslint/eslint-plugin` 8.40.0 → 8.58.0
+- `@typescript-eslint/parser` 8.40.0 → 8.58.0
+- `@vitejs/plugin-vue` 6.0.1 → 6.0.5
+- `@playwright/test` 1.54.2 → 1.59.1
+- `playwright` 1.54.2 → 1.59.1
+- `@types/lodash` 4.14.202 → 4.17.24
+- `@types/node` 24.3.0 → 22.19.17
+- `chalk` 5.5.0 → 5.6.2
+- `eslint-plugin-prettier` 5.5.4 → 5.5.5
+- `eslint-plugin-vue` 10.4.0 → 10.8.0
+- `prettier` 3.6.2 → 3.8.1
+- `vue` 3.5.18 → 3.5.32
+- `vue-eslint-parser` 10.2.0 → 10.4.0
+- `vue-tsc` 3.0.5 → 3.2.6
+
+### Technical Details
+- Workaround for TS 6.0.2 compiler crash with SDK v17 complex types in `index.ts` (config object extracted with `as any`)
+- Removed deprecated `baseUrl` from `tsconfig.json` (deprecated in TypeScript 6)
+- Regenerated `pnpm-lock.yaml` from scratch
+
 ## [0.2.17] - 2026-03-04
 
 ### Added
