@@ -279,6 +279,7 @@ import { debounce } from 'lodash';
 import { useStores, useCollection, useSync, useApi } from '@directus/extensions-sdk';
 import { formatTitle } from '@directus/format-title';
 import { getDefaultDisplayForType } from './utils/getDefaultDisplayForType';
+import { filterValidFields } from './utils/fieldValidity';
 import { useTableApi } from './composables/api';
 import { useAliasFields } from './composables/useAliasFields';
 import { useLanguageSelector } from './composables/useLanguageSelector';
@@ -431,8 +432,13 @@ const sortAllowed = computed(() => {
 // Use pagination composable
 const { page, limit } = useTablePagination(layoutQuery as any);
 
-// Use sort composable
-const { sort, tableSort, onSortChange } = useTableSort(layoutQuery as any);
+// Use sort composable — pass collection + fieldsStore so stale sort fields
+// referencing deleted columns are silently dropped (issue #47).
+const { sort, tableSort, onSortChange } = useTableSort(
+  layoutQuery as any,
+  collection as Ref<string | null>,
+  fieldsStore
+);
 
 // Fields with default value computation
 const fieldsDefaultValue = computed(() => {
@@ -445,9 +451,8 @@ const fieldsDefaultValue = computed(() => {
 
 const fields = computed({
   get() {
-    if (layoutQuery.value?.fields) {
-      return layoutQuery.value.fields;
-    }
+    const validFields = filterValidFields(layoutQuery.value?.fields, collection.value, fieldsStore);
+    if (validFields.length > 0) return validFields;
     return unref(fieldsDefaultValue);
   },
   set(value) {

@@ -44,6 +44,7 @@
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest --watch",
     "test:e2e": "node playwright-tools/test-extension.js",
+    "test:e2e:issue-47": "node playwright-tools/test-issue-47.js",
     "inspect": "node playwright-tools/inspect-vertical-alignment.js",
     "console": "node playwright-tools/playwright-console-monitor.js",
     "analyze": "node playwright-tools/playwright-assistant.js --report",
