@@ -94,3 +94,22 @@ export function filterValidSort(
   if (!sortEntries || sortEntries.length === 0) return [];
   return sortEntries.filter((s) => isSortFieldValid(s, collection, fieldsStore));
 }
+
+/**
+ * Issue #48: drop columnDisplays entries pointing at fields that have been
+ * deleted from the collection. Mirrors filterValidFields / filterValidSort.
+ */
+export function filterValidColumnDisplays<T>(
+  columnDisplays: Record<string, T> | null | undefined,
+  collection: string | null,
+  fieldsStore: FieldsStoreLike
+): Record<string, T> {
+  if (!columnDisplays || !collection) return {};
+  const result: Record<string, T> = {};
+  for (const [key, value] of Object.entries(columnDisplays)) {
+    if (isFieldValid(key, collection, fieldsStore)) {
+      result[key] = value;
+    }
+  }
+  return result;
+}
