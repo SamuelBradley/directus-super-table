@@ -1,5 +1,7 @@
 // CORE CHANGES - Following original Directus approach
 import { useStores, useCollection } from '@directus/extensions-sdk';
+import type { ColumnDisplay } from '../composables/useColumnDisplays';
+import { parseTemplateTokens, isRelational, pickHeuristic } from './displayHeuristics';
 
 /**
  * Helper function to get the related collection for a field
@@ -126,26 +128,105 @@ function getDisplayFieldsForRelation(
  * This function replicates the core logic from Directus core for proper display field resolution.
  * Enhanced with field existence validation to prevent requesting non-existent fields.
  */
-export function adjustFieldsForDisplays(
-  fields: readonly string[],
-  parentCollection: string
-): string[] {
-  // Get the stores, but handle the case where they're not available
-  let fieldsStore: any = null;
-  let relationsStore: any = null;
+// Module-level store cache. `useStores()` only works inside an active Vue
+// setup context. When `adjustFieldsForDisplays` is invoked from a reactive
+// recomputation (e.g. our `aliasedFields` computed reruns after columnDisplays
+// changes), the call may be outside the setup window — useStores() throws and
+// the function would otherwise fall back to returning the raw input fields,
+// which silently drops all path-expansion (override / heuristic / display).
+// We capture the singleton stores on the first successful call and reuse them.
+let cachedFieldsStore: any = null;
+let cachedRelationsStore: any = null;
+
+function ensureStores(): { fieldsStore: any; relationsStore: any } {
+  if (cachedFieldsStore && cachedRelationsStore) {
+    return { fieldsStore: cachedFieldsStore, relationsStore: cachedRelationsStore };
+  }
   try {
     const { useFieldsStore, useRelationsStore } = useStores();
-    fieldsStore = useFieldsStore();
-    relationsStore = useRelationsStore();
+    cachedFieldsStore = useFieldsStore();
+    cachedRelationsStore = useRelationsStore();
   } catch {
-    // Stores not available, return original fields
-    return [...fields];
+    /* stores not yet available — caller falls back to returning raw fields */
   }
+  return { fieldsStore: cachedFieldsStore, relationsStore: cachedRelationsStore };
+}
 
+export function adjustFieldsForDisplays(
+  fields: readonly string[],
+  parentCollection: string,
+  overrides: Record<string, ColumnDisplay> = {}
+): string[] {
+  const { fieldsStore, relationsStore } = ensureStores();
   if (!fieldsStore) return [...fields];
 
   const adjustedFields: string[] = fields
     .map((fieldKey) => {
+      // Issue #48: Override branch
+      //
+      // Storage normalization: layoutOptions.columnDisplays uses the *root* key
+      // (translations.title), but layoutQuery.fields entries can carry a language
+      // suffix (translations.title:de-DE). Strip the suffix before lookup so a
+      // single override applies to every language column for the same root field.
+      const storageKey = fieldKey.includes(':') ? fieldKey.split(':')[0] : fieldKey;
+      const override = overrides[storageKey];
+      if (override?.template) {
+        const tokens = parseTemplateTokens(override.template);
+        if (tokens.length === 0) return fieldKey;
+
+        const fieldDef = fieldsStore.getField(parentCollection, fieldKey);
+
+        // Plain field: tokens are already resolved at the parent level — return fieldKey
+        // (the template references the field's own value; no path expansion needed).
+        if (!isRelational(fieldDef)) {
+          return fieldKey;
+        }
+
+        // M2M: paths must traverse the junction's junction_field.
+        const isM2M = fieldDef?.meta?.special?.includes('m2m');
+        if (isM2M) {
+          const relations = relationsStore?.getRelationsForField(parentCollection, fieldKey);
+          const junctionField = relations?.[0]?.meta?.junction_field;
+          if (junctionField) {
+            return tokens.map((tok) => `${fieldKey}.${junctionField}.${tok}`);
+          }
+          return [`${fieldKey}.${tokens[0]}`]; // best-effort fallback
+        }
+
+        // M2O / O2M / files: direct dotted paths
+        return tokens.map((tok) => `${fieldKey}.${tok}`);
+      }
+
+      // Heuristic branch (Issue #48): when no override exists, the field is
+      // relational, AND no field-settings display is configured, derive a sensible
+      // template via pickHeuristic and expand API paths the same way as override.
+      const fieldDefForHeuristic = fieldsStore.getField(parentCollection, fieldKey);
+      if (
+        fieldDefForHeuristic &&
+        !fieldDefForHeuristic.meta?.display &&
+        isRelational(fieldDefForHeuristic) &&
+        !fieldDefForHeuristic.meta?.special?.includes('translations')
+      ) {
+        const heuristicTemplate = relationsStore
+          ? pickHeuristic(fieldDefForHeuristic, relationsStore as any, fieldsStore as any)
+          : null;
+        if (heuristicTemplate) {
+          const heuristicTokens = parseTemplateTokens(heuristicTemplate);
+          if (heuristicTokens.length > 0) {
+            const isM2M = fieldDefForHeuristic.meta?.special?.includes('m2m');
+            if (isM2M) {
+              const relations = relationsStore?.getRelationsForField(parentCollection, fieldKey);
+              const junctionField = relations?.[0]?.meta?.junction_field;
+              if (junctionField) {
+                return heuristicTokens.map((tok) => `${fieldKey}.${junctionField}.${tok}`);
+              }
+              return [`${fieldKey}.${heuristicTokens[0]}`];
+            }
+            return heuristicTokens.map((tok) => `${fieldKey}.${tok}`);
+          }
+        }
+      }
+
       const field = fieldsStore.getField(parentCollection, fieldKey);
 
       if (!field) return fieldKey;

@@ -4,6 +4,7 @@ import {
   isSortFieldValid,
   filterValidFields,
   filterValidSort,
+  filterValidColumnDisplays,
 } from '@/utils/fieldValidity';
 
 const COLLECTION = 'issue_47_test';
@@ -140,5 +141,54 @@ describe('filterValidSort', () => {
 
   it('returns [] when every entry references a deleted field', () => {
     expect(filterValidSort(['ghost_a', '-ghost_b'], COLLECTION, fieldsStore)).toEqual([]);
+  });
+});
+
+describe('filterValidColumnDisplays', () => {
+  let fieldsStore: ReturnType<typeof makeFieldsStore>;
+
+  beforeEach(() => {
+    fieldsStore = makeFieldsStore();
+  });
+
+  it('keeps entries whose root field still exists', () => {
+    const input = {
+      title: { template: '{{title}}' },
+      tags: { template: '{{name}}' },
+    };
+    expect(filterValidColumnDisplays(input, COLLECTION, fieldsStore)).toEqual({
+      title: { template: '{{title}}' },
+      tags: { template: '{{name}}' },
+    });
+  });
+
+  it('drops entries whose root field has been deleted', () => {
+    const input = {
+      title: { template: '{{title}}' },
+      ghost: { template: '{{name}}' },
+    };
+    expect(filterValidColumnDisplays(input, COLLECTION, fieldsStore)).toEqual({
+      title: { template: '{{title}}' },
+    });
+  });
+
+  it('keeps translation root entries (translations.title, no language suffix)', () => {
+    const input = {
+      'translations.title': { template: '📌 {{title}}' },
+    };
+    expect(filterValidColumnDisplays(input, COLLECTION, fieldsStore)).toEqual({
+      'translations.title': { template: '📌 {{title}}' },
+    });
+  });
+
+  it('returns {} for null/undefined/empty input', () => {
+    expect(filterValidColumnDisplays(null, COLLECTION, fieldsStore)).toEqual({});
+    expect(filterValidColumnDisplays(undefined, COLLECTION, fieldsStore)).toEqual({});
+    expect(filterValidColumnDisplays({}, COLLECTION, fieldsStore)).toEqual({});
+  });
+
+  it('returns {} when collection is null', () => {
+    const input = { title: { template: '{{title}}' } };
+    expect(filterValidColumnDisplays(input, null, fieldsStore)).toEqual({});
   });
 });

@@ -42,6 +42,33 @@ vi.mock('@/stores', () => ({
   useCollectionStore: () => mockCollectionStore,
 }));
 
+// Mock the extensions-sdk to keep the real module (and its transitive @directus/themes
+// → pinia chain) out of the test runtime. Individual tests can override via
+// vi.doMock + vi.resetModules() if they need richer behavior.
+vi.mock('@directus/extensions-sdk', () => ({
+  useStores: () => ({
+    useFieldsStore: () => mockFieldsStore,
+    useRelationsStore: () => mockRelationsStore,
+    useCollectionStore: () => mockCollectionStore,
+  }),
+  useCollection: () => ({ primaryKeyField: { value: { field: 'id' } } }),
+  useApi: () => ({
+    get: vi.fn(),
+    post: vi.fn(),
+    patch: vi.fn(),
+    delete: vi.fn(),
+  }),
+  useSync: <T,>(props: Record<string, T>, key: string, emit: (e: string, v: T) => void) => ({
+    get value(): T {
+      return props[key]!;
+    },
+    set value(v: T) {
+      emit(`update:${key}`, v);
+    },
+  }),
+  defineLayout: vi.fn(),
+}));
+
 // Mock Directus SDK
 vi.mock('@directus/sdk', () => ({
   createDirectus: vi.fn(),

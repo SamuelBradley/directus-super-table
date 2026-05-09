@@ -211,6 +211,7 @@
           :direct-boolean-toggle="(layoutOptions as any)?.directBooleanToggle"
           :primary-key-field-name="getPrimaryKeyFieldName()"
           :language-code-field="translationConfig.languageCodeField"
+          :column-displays="(layoutOptions as any)?.columnDisplays"
           @update="updateFieldValue"
           @save="autoSaveEdits"
         />
@@ -279,7 +280,7 @@ import { debounce } from 'lodash';
 import { useStores, useCollection, useSync, useApi } from '@directus/extensions-sdk';
 import { formatTitle } from '@directus/format-title';
 import { getDefaultDisplayForType } from './utils/getDefaultDisplayForType';
-import { filterValidFields } from './utils/fieldValidity';
+import { filterValidFields, filterValidColumnDisplays } from './utils/fieldValidity';
 import { useTableApi } from './composables/api';
 import { useAliasFields } from './composables/useAliasFields';
 import { useLanguageSelector } from './composables/useLanguageSelector';
@@ -471,10 +472,24 @@ const fieldsForAliasing = computed(() => {
   });
 });
 
-// Use alias fields for proper relational data handling
+// Use alias fields for proper relational data handling.
+// Issue #48: forward the columnDisplays override map so the API query expands
+// override template paths (e.g. `{{ user.first_name }}`) into deep field
+// requests via `adjustFieldsForDisplays`. Drop entries that point at fields
+// the user has since deleted from the collection (mirrors filterValidFields).
+type ColumnDisplayShape = { template: string; display?: string };
+const columnDisplaysRef = computed(() =>
+  filterValidColumnDisplays<ColumnDisplayShape>(
+    (layoutOptions.value as any)?.columnDisplays,
+    collection.value,
+    fieldsStore
+  )
+);
+
 const { aliasedFields, aliasQuery, getFromAliasedItem } = useAliasFields(
   fieldsForAliasing,
-  collection
+  collection,
+  columnDisplaysRef
 );
 
 // Create fields for API query using the aliased fields (following original Directus pattern)
@@ -923,6 +938,18 @@ async function handleQuickFilterSaved(event: any) {
     });
   }
 }
+
+// Issue #48: when columnDisplays change in options.vue (sibling slot), the prop
+// round-trip through the parent layout takes a few ticks. flush: 'post' makes
+// the watcher run after the DOM update so aliasedFields has fully settled
+// before we refetch.
+watch(
+  () => (layoutOptions.value as any)?.columnDisplays,
+  () => {
+    getItems();
+  },
+  { deep: true, flush: 'post' }
+);
 
 // Setup event listeners on mount
 onMounted(() => {
