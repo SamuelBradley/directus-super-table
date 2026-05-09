@@ -4,6 +4,11 @@ import { get } from '@directus/utils';
 // CORE IMPORTS
 import { adjustFieldsForDisplays } from '../utils/adjustFieldsForDisplays';
 
+interface ColumnDisplayLike {
+  template: string;
+  display?: string;
+}
+
 export type AliasFields =
   | {
       fieldName: string;
@@ -30,17 +35,22 @@ type UsableAliasFields = {
  * Generates aliases for field collisions when fetching the data for each display.
  * @param fields This list of fields to be aliased
  * @param collection The collection the fields belong to
+ * @param overrides Optional per-column display overrides (issue #48).
+ *                  Forwarded to `adjustFieldsForDisplays` so template tokens
+ *                  in overrides expand into deep API field requests.
  * @returns Info about the display fields and if the original fields were aliased
  */
 export function useAliasFields(
   fields: Ref<string[]> | string[],
-  collection: Ref<string | null> | string | null
+  collection: Ref<string | null> | string | null,
+  overrides?: Ref<Record<string, ColumnDisplayLike>> | Record<string, ColumnDisplayLike>
 ): UsableAliasFields {
   const aliasedFields = computed(() => {
     const aliasedFields: Record<string, AliasFields> = {};
 
     const _fields = unref(fields);
     const _collection = unref(collection);
+    const _overrides = unref(overrides) ?? {};
 
     if (!_fields || _fields.length === 0 || !_collection) return aliasedFields;
 
@@ -70,7 +80,7 @@ export function useAliasFields(
         aliasedFields[field] = {
           key: field,
           fieldName,
-          fields: adjustFieldsForDisplays([field], _collection),
+          fields: adjustFieldsForDisplays([field], _collection, _overrides),
           aliased: false,
         };
       } else {
@@ -79,7 +89,7 @@ export function useAliasFields(
         aliasedFields[field] = {
           key: field,
           fieldName,
-          fields: adjustFieldsForDisplays([field], _collection),
+          fields: adjustFieldsForDisplays([field], _collection, _overrides),
           aliased: false,
         };
       }

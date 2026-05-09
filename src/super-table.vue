@@ -211,6 +211,7 @@
           :direct-boolean-toggle="(layoutOptions as any)?.directBooleanToggle"
           :primary-key-field-name="getPrimaryKeyFieldName()"
           :language-code-field="translationConfig.languageCodeField"
+          :column-displays="(layoutOptions as any)?.columnDisplays"
           @update="updateFieldValue"
           @save="autoSaveEdits"
         />
@@ -471,10 +472,16 @@ const fieldsForAliasing = computed(() => {
   });
 });
 
-// Use alias fields for proper relational data handling
+// Use alias fields for proper relational data handling.
+// Issue #48: forward the columnDisplays override map so the API query expands
+// override template paths (e.g. `{{ user.first_name }}`) into deep field
+// requests via `adjustFieldsForDisplays`.
+const columnDisplaysRef = computed(() => (layoutOptions.value as any)?.columnDisplays ?? {});
+
 const { aliasedFields, aliasQuery, getFromAliasedItem } = useAliasFields(
   fieldsForAliasing,
-  collection
+  collection,
+  columnDisplaysRef
 );
 
 // Create fields for API query using the aliased fields (following original Directus pattern)
