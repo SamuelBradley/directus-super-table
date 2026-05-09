@@ -33,11 +33,23 @@
       Custom field name for language codes in translation collections (default: 'languages_code')
     </div>
   </div>
+
+  <ColumnDisplaysSection
+    v-if="props.collection && props.availableFieldChoices && props.availableFieldChoices.length > 0"
+    :collection="props.collection"
+    :column-displays="columnDisplays"
+    :available-fields="props.availableFieldChoices"
+    @set="onSet"
+    @remove="onRemove"
+  />
 </template>
 
 <script lang="ts" setup>
-import { computed } from 'vue';
+import { computed, type Ref } from 'vue';
 import { useSync } from '@directus/extensions-sdk';
+import ColumnDisplaysSection from './components/ColumnDisplaysSection.vue';
+import { useColumnDisplays } from './composables/useColumnDisplays';
+import type { ColumnDisplay } from './composables/useColumnDisplays';
 
 interface LayoutOptions {
   showToolbar?: boolean;
@@ -50,15 +62,31 @@ interface LayoutOptions {
   widths?: Record<string, number>;
   align?: Record<string, 'left' | 'center' | 'right'>;
   languageCodeField?: string;
+  columnDisplays?: Record<string, { template: string; display?: string }>;
 }
 
 const props = defineProps<{
   layoutOptions: LayoutOptions;
+  collection?: string;
+  availableFieldChoices?: Array<{ key: string; label: string }>;
 }>();
 
 const emit = defineEmits(['update:layoutOptions']);
 
 const layoutOptions = useSync(props, 'layoutOptions', emit);
+
+const {
+  all: columnDisplays,
+  setOverride,
+  removeOverride,
+} = useColumnDisplays(layoutOptions as unknown as Ref<LayoutOptions & { [key: string]: unknown }>);
+
+function onSet(payload: { fieldKey: string; display: ColumnDisplay }) {
+  setOverride(payload.fieldKey, payload.display);
+}
+function onRemove(fieldKey: string) {
+  removeOverride(fieldKey);
+}
 
 // General Settings
 const showToolbar = computed({
