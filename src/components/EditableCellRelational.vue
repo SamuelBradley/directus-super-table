@@ -610,13 +610,13 @@ function renderTemplate(value: any, template: string): string {
 }
 
 function handleUpdate(value: any) {
-  const primaryKey = Object.keys(props.item).find((key) => key === 'id' || key.endsWith('_id'));
+  const itemId = props.item?.[primaryKeyField.value];
 
-  if (primaryKey) {
+  if (itemId !== undefined && itemId !== null) {
     // Check if this is a full translations update
     if (typeof value === 'object' && value?.isFullTranslations) {
       // Handle full translations update from interface-translations
-      emit('update', props.item[primaryKey], 'translations', {
+      emit('update', itemId, 'translations', {
         isFullTranslations: true,
         translations: value.translations,
       });
@@ -631,17 +631,17 @@ function handleUpdate(value: any) {
         language: fieldLanguage.value, // Use language from field key or selected
         isTranslation: true,
       };
-      emit('update', props.item[primaryKey], props.fieldKey, translationUpdate);
+      emit('update', itemId, props.fieldKey, translationUpdate);
     } else {
-      emit('update', props.item[primaryKey], props.fieldKey, value);
+      emit('update', itemId, props.fieldKey, value);
     }
   }
 }
 
 function handleBooleanToggle(value: boolean) {
-  const primaryKey = Object.keys(props.item).find((key) => key === 'id' || key.endsWith('_id'));
-  if (primaryKey) {
-    emit('update', props.item[primaryKey], props.fieldKey, value);
+  const itemId = props.item?.[primaryKeyField.value];
+  if (itemId !== undefined && itemId !== null) {
+    emit('update', itemId, props.fieldKey, value);
   }
 }
 
