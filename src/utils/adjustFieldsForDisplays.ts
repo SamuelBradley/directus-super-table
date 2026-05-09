@@ -1,7 +1,7 @@
 // CORE CHANGES - Following original Directus approach
 import { useStores, useCollection } from '@directus/extensions-sdk';
 import type { ColumnDisplay } from '../composables/useColumnDisplays';
-import { parseTemplateTokens, isRelational } from './displayHeuristics';
+import { parseTemplateTokens, isRelational, pickHeuristic } from './displayHeuristics';
 
 /**
  * Helper function to get the related collection for a field
@@ -182,6 +182,36 @@ export function adjustFieldsForDisplays(
 
         // M2O / O2M / files: direct dotted paths
         return tokens.map((tok) => `${fieldKey}.${tok}`);
+      }
+
+      // Heuristic branch (Issue #48): when no override exists, the field is
+      // relational, AND no field-settings display is configured, derive a sensible
+      // template via pickHeuristic and expand API paths the same way as override.
+      const fieldDefForHeuristic = fieldsStore.getField(parentCollection, fieldKey);
+      if (
+        fieldDefForHeuristic &&
+        !fieldDefForHeuristic.meta?.display &&
+        isRelational(fieldDefForHeuristic) &&
+        !fieldDefForHeuristic.meta?.special?.includes('translations')
+      ) {
+        const heuristicTemplate = relationsStore
+          ? pickHeuristic(fieldDefForHeuristic, relationsStore as any, fieldsStore as any)
+          : null;
+        if (heuristicTemplate) {
+          const heuristicTokens = parseTemplateTokens(heuristicTemplate);
+          if (heuristicTokens.length > 0) {
+            const isM2M = fieldDefForHeuristic.meta?.special?.includes('m2m');
+            if (isM2M) {
+              const relations = relationsStore?.getRelationsForField(parentCollection, fieldKey);
+              const junctionField = relations?.[0]?.meta?.junction_field;
+              if (junctionField) {
+                return heuristicTokens.map((tok) => `${fieldKey}.${junctionField}.${tok}`);
+              }
+              return [`${fieldKey}.${heuristicTokens[0]}`];
+            }
+            return heuristicTokens.map((tok) => `${fieldKey}.${tok}`);
+          }
+        }
       }
 
       const field = fieldsStore.getField(parentCollection, fieldKey);

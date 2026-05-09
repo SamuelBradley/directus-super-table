@@ -292,6 +292,7 @@ const displayValue = computed(() => {
 
   let template: string | null | undefined = null;
   let isOverridePath = false;
+  let isHeuristicPath = false;
 
   if (override?.template) {
     template = override.template;
@@ -301,20 +302,23 @@ const displayValue = computed(() => {
   } else {
     // Heuristic only fires for relational fields without override/field.display
     const heuristic = pickHeuristic(props.field as any, relationsStore as any, fieldsStore as any);
-    if (heuristic) template = heuristic;
+    if (heuristic) {
+      template = heuristic;
+      isHeuristicPath = true;
+    }
   }
 
   if (template) {
     const relationalValue = props.item[props.fieldKey];
 
-    // M2M unwrap when override active. For heuristic / field-display paths, the
-    // existing render path already handles the data shape correctly.
+    // M2M unwrap when override OR heuristic provides the template. (Field-display
+    // renders via the existing path which handles its own shape.)
     let valueForTemplate = relationalValue;
-    if (
-      isOverridePath &&
+    const needsM2MUnwrap =
+      (isOverridePath || isHeuristicPath) &&
       Array.isArray(relationalValue) &&
-      props.field?.meta?.special?.includes('m2m')
-    ) {
+      props.field?.meta?.special?.includes('m2m');
+    if (needsM2MUnwrap) {
       const collection = props.field?.collection;
       const fieldName = props.field?.field;
       if (collection && fieldName) {
