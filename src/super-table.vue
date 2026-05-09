@@ -273,24 +273,14 @@
 </template>
 
 <script lang="ts" setup>
-import {
-  ref,
-  computed,
-  toRefs,
-  watch,
-  unref,
-  nextTick,
-  onMounted,
-  onUnmounted,
-  type Ref,
-} from 'vue';
+import { ref, computed, toRefs, watch, unref, onMounted, onUnmounted, type Ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { debounce } from 'lodash';
 import { useStores, useCollection, useSync, useApi } from '@directus/extensions-sdk';
 import { formatTitle } from '@directus/format-title';
 import { getDefaultDisplayForType } from './utils/getDefaultDisplayForType';
-import { filterValidFields } from './utils/fieldValidity';
+import { filterValidFields, filterValidColumnDisplays } from './utils/fieldValidity';
 import { useTableApi } from './composables/api';
 import { useAliasFields } from './composables/useAliasFields';
 import { useLanguageSelector } from './composables/useLanguageSelector';
@@ -485,8 +475,16 @@ const fieldsForAliasing = computed(() => {
 // Use alias fields for proper relational data handling.
 // Issue #48: forward the columnDisplays override map so the API query expands
 // override template paths (e.g. `{{ user.first_name }}`) into deep field
-// requests via `adjustFieldsForDisplays`.
-const columnDisplaysRef = computed(() => (layoutOptions.value as any)?.columnDisplays ?? {});
+// requests via `adjustFieldsForDisplays`. Drop entries that point at fields
+// the user has since deleted from the collection (mirrors filterValidFields).
+type ColumnDisplayShape = { template: string; display?: string };
+const columnDisplaysRef = computed(() =>
+  filterValidColumnDisplays<ColumnDisplayShape>(
+    (layoutOptions.value as any)?.columnDisplays,
+    collection.value,
+    fieldsStore
+  )
+);
 
 const { aliasedFields, aliasQuery, getFromAliasedItem } = useAliasFields(
   fieldsForAliasing,
@@ -941,31 +939,17 @@ async function handleQuickFilterSaved(event: any) {
   }
 }
 
-// Issue #48: when columnDisplays change locally, our own reactive chain handles
-// the rebuild AND the watch on fieldsWithRelational fires. But when the change
-// originates in options.vue (a sibling slot), the prop round-trip through the
-// parent layout takes a few ticks. We watch our own layoutOptions for changes
-// to the columnDisplays map and force a refetch after nextTick so aliasedFields
-// has fully settled.
+// Issue #48: when columnDisplays change in options.vue (sibling slot), the prop
+// round-trip through the parent layout takes a few ticks. flush: 'post' makes
+// the watcher run after the DOM update so aliasedFields has fully settled
+// before we refetch.
 watch(
   () => (layoutOptions.value as any)?.columnDisplays,
-  async () => {
-    await nextTick();
+  () => {
     getItems();
   },
-  { deep: true }
+  { deep: true, flush: 'post' }
 );
-
-// Window-event fallback: options.vue dispatches this after setOverride/removeOverride.
-// Helps in cases where the prop sync hasn't propagated by the time our local
-// watch (above) would have fired. Both paths converge on the same getItems call;
-// directus' API layer dedupes in-flight requests so this isn't a double-fetch.
-function handleColumnDisplaysChanged() {
-  // 250ms ≈ enough for the options.vue → parent layout → super-table.vue prop
-  // round-trip to land. Microtask-precise nextTick is too eager here because
-  // the round-trip spans a full event-loop turn (parent re-render).
-  setTimeout(() => getItems(), 250);
-}
 
 // Setup event listeners on mount
 onMounted(() => {
@@ -977,12 +961,10 @@ onMounted(() => {
 
   // Listen for save events from actions
   window.addEventListener('quick-filter-saved', handleQuickFilterSaved);
-  window.addEventListener('super-layout-table:refresh', handleColumnDisplaysChanged);
 });
 
 onUnmounted(() => {
   window.removeEventListener('quick-filter-saved', handleQuickFilterSaved);
-  window.removeEventListener('super-layout-table:refresh', handleColumnDisplaysChanged);
 });
 
 // Update manual filters when props.filter changes (from native filter interface)

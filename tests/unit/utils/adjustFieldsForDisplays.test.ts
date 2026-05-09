@@ -4,6 +4,11 @@ import { vi } from 'vitest';
 // Note: adjustFieldsForDisplays uses useStores() at runtime which we mock in
 // tests/setup.ts. With those mocks, calling it with no overrides should return
 // the original fields unchanged when the store has no field metadata.
+// Reset modules before every test so the module-level store cache in
+// adjustFieldsForDisplays.ts cannot leak between tests.
+beforeEach(() => {
+  vi.resetModules();
+});
 
 describe('adjustFieldsForDisplays', () => {
   it('accepts overrides as an optional third parameter', async () => {

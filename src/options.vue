@@ -83,21 +83,9 @@ const {
 
 function onSet(payload: { fieldKey: string; display: ColumnDisplay }) {
   setOverride(payload.fieldKey, payload.display);
-  scheduleTableRefresh();
 }
 function onRemove(fieldKey: string) {
   removeOverride(fieldKey);
-  scheduleTableRefresh();
-}
-
-// After mutating columnDisplays we need the table to refetch with the new
-// override-driven deep paths. Reactivity propagates through the parent layout
-// asynchronously, so we dispatch a window event after the next tick — super-table.vue
-// listens for it and calls getItems() with fresh aliasedFields.
-function scheduleTableRefresh() {
-  setTimeout(() => {
-    window.dispatchEvent(new CustomEvent('super-layout-table:refresh'));
-  }, 0);
 }
 
 // Issue #48: read setters from `props.layoutOptions` instead of the synced ref.

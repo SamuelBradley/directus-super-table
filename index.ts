@@ -27,18 +27,20 @@ const layoutConfig = {
     // components (options sidebar). Each entry uses the *root* field key as id
     // (translations.title rather than translations.title:de-DE) so all
     // language variants of the same root field share a single override entry.
+    // Multiple language columns of the same root collapse into one picker entry.
     const availableFieldChoices = computed(() => {
       const layoutFields: string[] = props.layoutQuery?.fields ?? [];
       const customFieldNames: Record<string, string> = props.layoutOptions?.customFieldNames ?? {};
-      return layoutFields.map((key: string) => {
-        // Storage key: strip language suffix so translations roll up to a
-        // single override entry per root field.
+      const seen = new Map<string, { key: string; label: string }>();
+      for (const key of layoutFields) {
         const rootKey = key.includes(':') ? key.split(':')[0] : key;
+        if (seen.has(rootKey)) continue;
         const root = rootKey.split('.')[0];
         const fieldData = fieldsStore.getField(props.collection, root);
         const fallbackName = fieldData?.name ?? formatTitle(rootKey);
-        return { key: rootKey, label: customFieldNames[key] ?? fallbackName };
-      });
+        seen.set(rootKey, { key: rootKey, label: customFieldNames[key] ?? fallbackName });
+      }
+      return Array.from(seen.values());
     });
 
     return {
