@@ -101,12 +101,12 @@
         :field="actualFieldKey"
         :alignment="align"
       />
-      <!-- ABSOLUTE PRIORITY: User-configured display templates (ALL field types) -->
+      <!-- ABSOLUTE PRIORITY: Resolved display via override → field → heuristic chain -->
       <render-display
-        v-if="field?.display"
+        v-if="resolvedDisplay.display !== null"
         :value="value"
-        :display="field?.display"
-        :options="field?.displayOptions"
+        :display="resolvedDisplay.display"
+        :options="resolvedDisplay.options"
         :interface="field?.interface"
         :interface-options="field?.interfaceOptions"
         :type="field?.type"
@@ -137,7 +137,7 @@
 
   <!-- ABSOLUTE PRIORITY: Display templates for relational fields -->
   <div
-    v-else-if="field?.display"
+    v-else-if="resolvedDisplay.display !== null"
     class="editable-cell relational"
     :style="{ textAlign: props.align || 'left' }"
   >
@@ -156,6 +156,7 @@
 <script lang="ts" setup>
 import { computed, onBeforeMount, markRaw, ref } from 'vue';
 import type { Field, Item } from '@directus/types';
+import { useStores } from '@directus/extensions-sdk';
 import InlineEditPopover from './InlineEditPopover.vue';
 import BooleanToggleCell from './CellRenderers/BooleanToggleCell.vue';
 import SelectCell from './CellRenderers/SelectCell.vue';
@@ -164,6 +165,11 @@ import RelationalCell from './CellRenderers/RelationalCell.vue';
 import ColorCell from './CellRenderers/ColorCell.vue';
 import TagCell from './TagCell.vue';
 import { isFieldEditable, getFieldEditWarning, getFieldSupportLevel } from '../utils/fieldSupport';
+import { pickHeuristic } from '../utils/displayHeuristics';
+
+const { useFieldsStore, useRelationsStore } = useStores();
+const fieldsStore = useFieldsStore();
+const relationsStore = useRelationsStore();
 
 const props = defineProps<{
   item: Item;
@@ -178,6 +184,7 @@ const props = defineProps<{
   directBooleanToggle?: boolean;
   primaryKeyFieldName?: string;
   languageCodeField?: string;
+  columnDisplays?: Record<string, { template: string; display?: string }>;
 }>();
 
 const emit = defineEmits<{
@@ -274,16 +281,67 @@ const displayValue = computed(() => {
     return null;
   }
 
-  // Handle relational fields with display templates
-  const template =
+  // Handle relational fields with display templates.
+  // Resolved priority: override → field-display → heuristic → none.
+  // Issue #48: layout-level override (columnDisplays) takes priority over the
+  // field-settings display.
+  const storageKey = props.fieldKey.includes(':') ? props.fieldKey.split(':')[0] : props.fieldKey;
+  const override = props.columnDisplays?.[storageKey];
+  const fieldTemplate =
     props.field?.displayOptions?.template || props.field?.meta?.display_options?.template;
 
-  if (template && props.field?.display) {
+  let template: string | null | undefined = null;
+  let isOverridePath = false;
+
+  if (override?.template) {
+    template = override.template;
+    isOverridePath = true;
+  } else if (props.field?.display && fieldTemplate) {
+    template = fieldTemplate;
+  } else {
+    // Heuristic only fires for relational fields without override/field.display
+    const heuristic = pickHeuristic(props.field as any, relationsStore as any, fieldsStore as any);
+    if (heuristic) template = heuristic;
+  }
+
+  if (template) {
     const relationalValue = props.item[props.fieldKey];
 
-    // If we have an object, use it
-    if (relationalValue && typeof relationalValue === 'object') {
-      return renderTemplate(relationalValue, template);
+    // M2M unwrap when override active. For heuristic / field-display paths, the
+    // existing render path already handles the data shape correctly.
+    let valueForTemplate = relationalValue;
+    if (
+      isOverridePath &&
+      Array.isArray(relationalValue) &&
+      props.field?.meta?.special?.includes('m2m')
+    ) {
+      const collection = props.field?.collection;
+      const fieldName = props.field?.field;
+      if (collection && fieldName) {
+        const relations = relationsStore.getRelationsForField(collection, fieldName);
+        const junctionField = relations?.[0]?.meta?.junction_field;
+        if (junctionField) {
+          valueForTemplate = relationalValue
+            .map((item: any) => item?.[junctionField])
+            .filter(Boolean);
+        }
+      }
+    }
+
+    // If we have an array (M2M / O2M), render each item with the template and join
+    if (Array.isArray(valueForTemplate)) {
+      if (valueForTemplate.length === 0) return '—';
+      return valueForTemplate
+        .map((item: any) =>
+          item && typeof item === 'object' ? renderTemplate(item, template as string) : String(item)
+        )
+        .filter((s) => s && s !== '—')
+        .join(', ');
+    }
+
+    // Single object → render once
+    if (valueForTemplate && typeof valueForTemplate === 'object') {
+      return renderTemplate(valueForTemplate, template);
     }
 
     // If corrupted (primitive value), try cache fallback
@@ -313,6 +371,50 @@ const displayValue = computed(() => {
 
   // Simple field access
   return props.item[props.fieldKey];
+});
+
+type ResolvedDisplay = {
+  display: string | null;
+  options: Record<string, unknown>;
+  source: 'override' | 'field' | 'heuristic' | 'raw';
+};
+
+const resolvedDisplay = computed<ResolvedDisplay>(() => {
+  // Storage key for translations is the root (no language suffix)
+  const storageKey = props.fieldKey.includes(':') ? props.fieldKey.split(':')[0] : props.fieldKey;
+
+  // 1. Layout-level override (renders via related-values unless the user
+  //    explicitly stored a different display id alongside the template)
+  const override = props.columnDisplays?.[storageKey];
+  if (override?.template) {
+    return {
+      display: override.display ?? 'related-values',
+      options: { template: override.template },
+      source: 'override',
+    };
+  }
+
+  // 2. Field-settings display — pass the full options object so template-less
+  //    displays (image, color, formatted-value with prefix/suffix, ...) work.
+  if (props.field?.display) {
+    return {
+      display: props.field.display,
+      options: (props.field as any).displayOptions ?? props.field?.meta?.display_options ?? {},
+      source: 'field',
+    };
+  }
+
+  // 3. Smart heuristics for relational fields without any configured display
+  const heuristic = pickHeuristic(props.field as any, relationsStore as any, fieldsStore as any);
+  if (heuristic) {
+    return {
+      display: 'related-values',
+      options: { template: heuristic },
+      source: 'heuristic',
+    };
+  }
+
+  return { display: null, options: {}, source: 'raw' };
 });
 
 // Check if field is editable using the field support utility
