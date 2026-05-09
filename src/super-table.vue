@@ -273,7 +273,17 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, computed, toRefs, watch, unref, onMounted, onUnmounted, type Ref } from 'vue';
+import {
+  ref,
+  computed,
+  toRefs,
+  watch,
+  unref,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  type Ref,
+} from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { debounce } from 'lodash';
@@ -931,6 +941,32 @@ async function handleQuickFilterSaved(event: any) {
   }
 }
 
+// Issue #48: when columnDisplays change locally, our own reactive chain handles
+// the rebuild AND the watch on fieldsWithRelational fires. But when the change
+// originates in options.vue (a sibling slot), the prop round-trip through the
+// parent layout takes a few ticks. We watch our own layoutOptions for changes
+// to the columnDisplays map and force a refetch after nextTick so aliasedFields
+// has fully settled.
+watch(
+  () => (layoutOptions.value as any)?.columnDisplays,
+  async () => {
+    await nextTick();
+    getItems();
+  },
+  { deep: true }
+);
+
+// Window-event fallback: options.vue dispatches this after setOverride/removeOverride.
+// Helps in cases where the prop sync hasn't propagated by the time our local
+// watch (above) would have fired. Both paths converge on the same getItems call;
+// directus' API layer dedupes in-flight requests so this isn't a double-fetch.
+function handleColumnDisplaysChanged() {
+  // 250ms ≈ enough for the options.vue → parent layout → super-table.vue prop
+  // round-trip to land. Microtask-precise nextTick is too eager here because
+  // the round-trip spans a full event-loop turn (parent re-render).
+  setTimeout(() => getItems(), 250);
+}
+
 // Setup event listeners on mount
 onMounted(() => {
   // Load presets from layoutOptions (no localStorage needed)
@@ -941,10 +977,12 @@ onMounted(() => {
 
   // Listen for save events from actions
   window.addEventListener('quick-filter-saved', handleQuickFilterSaved);
+  window.addEventListener('super-layout-table:refresh', handleColumnDisplaysChanged);
 });
 
 onUnmounted(() => {
   window.removeEventListener('quick-filter-saved', handleQuickFilterSaved);
+  window.removeEventListener('super-layout-table:refresh', handleColumnDisplaysChanged);
 });
 
 // Update manual filters when props.filter changes (from native filter interface)

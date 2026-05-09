@@ -104,24 +104,22 @@ watch(
 
 <style scoped>
 .column-display-editor {
-  border: 2px solid var(--primary);
-  border-radius: 4px;
-  padding: 8px;
-  background: var(--background-page);
-  margin-bottom: 4px;
+  width: 100%;
+  margin-bottom: 12px;
 }
 .field {
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 .label {
-  font-size: 10px;
-  text-transform: uppercase;
-  color: var(--foreground-subdued);
+  display: block;
   margin-bottom: 4px;
+  color: var(--foreground-normal);
+  font-weight: 600;
+  font-size: 13px;
 }
 .actions {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   justify-content: flex-end;
 }
 </style>

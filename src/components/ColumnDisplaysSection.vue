@@ -1,6 +1,6 @@
 <template>
   <div class="column-displays-section">
-    <div class="section-label">Column Displays</div>
+    <div class="type-label">Column Displays</div>
 
     <template v-for="(display, fieldKey) in columnDisplays" :key="fieldKey">
       <ColumnDisplayEditor
@@ -86,30 +86,33 @@ function onDelete(fieldKey: string) {
 
 <style scoped>
 .column-displays-section {
-  margin-top: 16px;
+  /* The Directus layout-options sidebar is a 2-col CSS grid; span both cols */
+  grid-column: 1 / -1;
+  margin-top: var(--form-vertical-gap);
 }
-.section-label {
-  font-weight: 600;
-  font-size: 12px;
-  text-transform: uppercase;
-  color: var(--foreground-subdued);
+.type-label {
+  display: block;
   margin-bottom: 8px;
+  color: var(--foreground-normal);
+  font-weight: 600;
+  font-size: 14px;
 }
 .add-button {
   width: 100%;
   padding: 8px;
-  border: 2px dashed var(--primary-50);
+  border: 1px dashed var(--border-normal);
   background: transparent;
-  border-radius: 4px;
-  color: var(--primary);
-  font-size: 12px;
+  border-radius: var(--border-radius);
+  color: var(--foreground-subdued);
+  font-size: 13px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 6px;
 }
 .add-button:hover {
-  background: var(--primary-10);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 </style>

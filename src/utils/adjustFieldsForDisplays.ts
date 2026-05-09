@@ -128,23 +128,36 @@ function getDisplayFieldsForRelation(
  * This function replicates the core logic from Directus core for proper display field resolution.
  * Enhanced with field existence validation to prevent requesting non-existent fields.
  */
+// Module-level store cache. `useStores()` only works inside an active Vue
+// setup context. When `adjustFieldsForDisplays` is invoked from a reactive
+// recomputation (e.g. our `aliasedFields` computed reruns after columnDisplays
+// changes), the call may be outside the setup window — useStores() throws and
+// the function would otherwise fall back to returning the raw input fields,
+// which silently drops all path-expansion (override / heuristic / display).
+// We capture the singleton stores on the first successful call and reuse them.
+let cachedFieldsStore: any = null;
+let cachedRelationsStore: any = null;
+
+function ensureStores(): { fieldsStore: any; relationsStore: any } {
+  if (cachedFieldsStore && cachedRelationsStore) {
+    return { fieldsStore: cachedFieldsStore, relationsStore: cachedRelationsStore };
+  }
+  try {
+    const { useFieldsStore, useRelationsStore } = useStores();
+    cachedFieldsStore = useFieldsStore();
+    cachedRelationsStore = useRelationsStore();
+  } catch {
+    /* stores not yet available — caller falls back to returning raw fields */
+  }
+  return { fieldsStore: cachedFieldsStore, relationsStore: cachedRelationsStore };
+}
+
 export function adjustFieldsForDisplays(
   fields: readonly string[],
   parentCollection: string,
   overrides: Record<string, ColumnDisplay> = {}
 ): string[] {
-  // Get the stores, but handle the case where they're not available
-  let fieldsStore: any = null;
-  let relationsStore: any = null;
-  try {
-    const { useFieldsStore, useRelationsStore } = useStores();
-    fieldsStore = useFieldsStore();
-    relationsStore = useRelationsStore();
-  } catch {
-    // Stores not available, return original fields
-    return [...fields];
-  }
-
+  const { fieldsStore, relationsStore } = ensureStores();
   if (!fieldsStore) return [...fields];
 
   const adjustedFields: string[] = fields

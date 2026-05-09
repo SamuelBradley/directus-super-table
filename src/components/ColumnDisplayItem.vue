@@ -32,15 +32,17 @@ function onDelete() {
 
 <style scoped>
 .column-display-item {
-  padding: 8px;
-  border: 1px solid var(--primary);
-  background: var(--primary-25);
-  border-radius: 4px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subdued);
+  background: var(--background-subdued);
+  border-radius: var(--border-radius);
   cursor: pointer;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 .column-display-item:hover {
-  background: var(--primary-50);
+  border-color: var(--border-normal);
+  background: var(--background-normal-alt, var(--background-subdued));
 }
 .header {
   display: flex;
@@ -49,16 +51,18 @@ function onDelete() {
 }
 .field-label {
   font-weight: 600;
-  font-size: 12px;
+  font-size: 13px;
+  color: var(--foreground-normal);
 }
 .actions {
   display: flex;
   gap: 4px;
+  color: var(--foreground-subdued);
 }
 .template-preview {
-  font-family: monospace;
-  font-size: 11px;
-  color: var(--primary);
+  font-family: var(--family-monospace);
+  font-size: 12px;
+  color: var(--foreground-subdued);
   margin-top: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
