@@ -5,7 +5,21 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.1] - 2026-05-09
+## [0.3.2] - 2026-05-09
+
+### Fixed
+- **Inline editing silently failing for collections with non-`id` primary key
+  (Issue #44).** `handleUpdate` and `handleBooleanToggle` in
+  `EditableCellRelational.vue` were detecting the primary key by name pattern
+  matching (`key === 'id' || key.endsWith('_id')`), which produced no result on
+  collections whose primary key uses a different name (`code`, `slug`, `uuid`,
+  `sku`, …). Both functions now read the primary key field name from the
+  `primaryKeyField` computed property, which is sourced from the Directus
+  schema via the parent component. The previous heuristic could also have
+  selected an unrelated foreign-key column ending in `_id` and dispatched the
+  PATCH against the wrong record; that misdirection is no longer possible.
+
+
 
 ### Changed
 - Bumped 21 development dependencies to their latest patch versions within
