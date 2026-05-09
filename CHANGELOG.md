@@ -5,6 +5,53 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-05-09
+
+### Added
+- **Per-column display configuration for relational fields (Issue #48).** A new
+  "Column Displays" section in the layout sidebar lets you pick a relational
+  column and assign a Directus display template (e.g. `{{ first_name }} {{ last_name }}`)
+  without leaving the layout. Saved per layout preset under
+  `layoutOptions.columnDisplays`.
+- Heuristic display fallback for relational fields with no explicit display
+  configuration: `directus_users` → `{{first_name}} {{last_name}}`,
+  `directus_files` → `{{title}}` / `{{filename_download}}`, custom
+  collections → first existing of `name | title | label`.
+- M2M columns automatically resolve through the junction table — the override
+  template targets the related collection directly, no manual `junction_field`
+  hop required.
+- Storage-key normalization for translation columns: a single override on
+  `translations.title` applies to every language column for that field
+  (`translations.title:de-DE`, `translations.title:en-US`, …).
+
+### Fixed
+- **Empty table after deleting fields (Issue #47).** Stale references in saved
+  layout presets now self-heal at read time. `layoutQuery.fields`,
+  `layoutQuery.sort`, and `layoutOptions.columnDisplays` drop entries pointing
+  at fields that no longer exist on the collection, eliminating the HTTP 403
+  that previously left the table blank.
+
+### Changed
+- `adjustFieldsForDisplays` now accepts an optional `overrides` parameter and
+  expands template tokens into deep API paths, including M2M junction
+  traversal. Translations bypass the heuristic + junction logic to preserve
+  the existing dedicated render path.
+- `useAliasFields` forwards the `columnDisplays` override map so the API query
+  requests the fields the override template references.
+
+### Internal
+- New utility `src/utils/displayHeuristics.ts` (parser, target-collection
+  resolver, heuristic picker) with 19 unit tests.
+- New utility `src/utils/fieldValidity.ts::filterValidColumnDisplays` mirroring
+  the existing `filterValidFields` / `filterValidSort` symmetry.
+- New composable `src/composables/useColumnDisplays.ts` for CRUD over the
+  override map (empty template = remove entry).
+- New components in `src/components/`: `ColumnDisplaysSection.vue`,
+  `ColumnDisplayItem.vue`, `ColumnDisplayEditor.vue`.
+- Test infrastructure: `tests/setup.ts` now mocks `@directus/extensions-sdk`
+  globally so the test runtime never pulls `@directus/themes` (which would
+  drag in `pinia`, an indirect dep that fails on clean CI installs).
+
 ## [0.2.18] - 2026-04-04
 
 ### Changed
