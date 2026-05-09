@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isRelational, parseTemplateTokens } from '@/utils/displayHeuristics';
+import { isRelational, parseTemplateTokens, resolveTargetCollection } from '@/utils/displayHeuristics';
 
 describe('isRelational', () => {
   it('returns true when meta.special includes m2o, o2m, m2m, m2a, files, translations', () => {
@@ -44,5 +44,90 @@ describe('parseTemplateTokens', () => {
 
   it('deduplicates repeated tokens', () => {
     expect(parseTemplateTokens('{{name}} - {{name}}')).toEqual(['name']);
+  });
+});
+
+describe('resolveTargetCollection', () => {
+  function makeRelationsStore(relations: Record<string, any[]>) {
+    return {
+      getRelationsForField: (collection: string, fieldName: string) =>
+        relations[`${collection}.${fieldName}`] ?? [],
+    };
+  }
+  function makeFieldsStore(map: Record<string, any>) {
+    return {
+      getField: (collection: string | null, field: string) =>
+        collection ? map[`${collection}.${field}`] ?? null : null,
+    };
+  }
+
+  it('returns m2o target collection', () => {
+    const relations = makeRelationsStore({
+      'parent.author': [
+        { collection: 'parent', field: 'author', related_collection: 'directus_users' },
+      ],
+    });
+    const fields = makeFieldsStore({});
+    const field = { collection: 'parent', field: 'author', meta: { special: ['m2o'] } } as any;
+    expect(resolveTargetCollection(field, relations as any, fields as any)).toBe('directus_users');
+  });
+
+  it('returns target through the junction for m2m', () => {
+    const relations = makeRelationsStore({
+      'parent.tags': [
+        {
+          collection: 'parent_tags',
+          field: 'parent_id',
+          related_collection: 'parent',
+          meta: { junction_field: 'tag_id' },
+        },
+      ],
+    });
+    const fields = makeFieldsStore({
+      'parent_tags.tag_id': {
+        schema: { foreign_key_table: 'tags' },
+        meta: { special: ['m2o'] },
+      },
+    });
+    const field = { collection: 'parent', field: 'tags', meta: { special: ['m2m'] } } as any;
+    expect(resolveTargetCollection(field, relations as any, fields as any)).toBe('tags');
+  });
+
+  it('returns null when no relations are defined', () => {
+    const relations = makeRelationsStore({});
+    const fields = makeFieldsStore({});
+    const field = { collection: 'parent', field: 'unknown', meta: { special: ['m2o'] } } as any;
+    expect(resolveTargetCollection(field, relations as any, fields as any)).toBe(null);
+  });
+
+  it('returns null for a non-relational field', () => {
+    const relations = makeRelationsStore({});
+    const fields = makeFieldsStore({});
+    const field = { collection: 'parent', field: 'title', meta: { special: [] } } as any;
+    expect(resolveTargetCollection(field, relations as any, fields as any)).toBe(null);
+  });
+
+  it('does NOT junction-traverse for translation fields (special=translations)', () => {
+    // Translation relations also carry meta.junction_field (languages_code), but the
+    // intended target is the translations collection itself — not the languages table.
+    const relations = makeRelationsStore({
+      'parent.translations': [
+        {
+          collection: 'parent_translations',
+          field: 'parent_id',
+          related_collection: 'parent',
+          meta: { junction_field: 'languages_code' },
+        },
+      ],
+    });
+    const fields = makeFieldsStore({});
+    const field = {
+      collection: 'parent',
+      field: 'translations',
+      meta: { special: ['translations'] },
+    } as any;
+    expect(resolveTargetCollection(field, relations as any, fields as any)).toBe(
+      'parent_translations'
+    );
   });
 });
