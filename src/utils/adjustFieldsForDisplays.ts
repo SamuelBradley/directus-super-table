@@ -1,6 +1,7 @@
 // CORE CHANGES - Following original Directus approach
 import { useStores, useCollection } from '@directus/extensions-sdk';
 import type { ColumnDisplay } from '../composables/useColumnDisplays';
+import { parseTemplateTokens, isRelational } from './displayHeuristics';
 
 /**
  * Helper function to get the related collection for a field
@@ -132,10 +133,6 @@ export function adjustFieldsForDisplays(
   parentCollection: string,
   overrides: Record<string, ColumnDisplay> = {}
 ): string[] {
-  // Issue #48: `overrides` is wired into the .map() in Task 7. Reference it here
-  // to satisfy noUnusedParameters without changing behavior.
-  void overrides;
-
   // Get the stores, but handle the case where they're not available
   let fieldsStore: any = null;
   let relationsStore: any = null;
@@ -152,6 +149,41 @@ export function adjustFieldsForDisplays(
 
   const adjustedFields: string[] = fields
     .map((fieldKey) => {
+      // Issue #48: Override branch
+      //
+      // Storage normalization: layoutOptions.columnDisplays uses the *root* key
+      // (translations.title), but layoutQuery.fields entries can carry a language
+      // suffix (translations.title:de-DE). Strip the suffix before lookup so a
+      // single override applies to every language column for the same root field.
+      const storageKey = fieldKey.includes(':') ? fieldKey.split(':')[0] : fieldKey;
+      const override = overrides[storageKey];
+      if (override?.template) {
+        const tokens = parseTemplateTokens(override.template);
+        if (tokens.length === 0) return fieldKey;
+
+        const fieldDef = fieldsStore.getField(parentCollection, fieldKey);
+
+        // Plain field: tokens are already resolved at the parent level — return fieldKey
+        // (the template references the field's own value; no path expansion needed).
+        if (!isRelational(fieldDef)) {
+          return fieldKey;
+        }
+
+        // M2M: paths must traverse the junction's junction_field.
+        const isM2M = fieldDef?.meta?.special?.includes('m2m');
+        if (isM2M) {
+          const relations = relationsStore?.getRelationsForField(parentCollection, fieldKey);
+          const junctionField = relations?.[0]?.meta?.junction_field;
+          if (junctionField) {
+            return tokens.map((tok) => `${fieldKey}.${junctionField}.${tok}`);
+          }
+          return [`${fieldKey}.${tokens[0]}`]; // best-effort fallback
+        }
+
+        // M2O / O2M / files: direct dotted paths
+        return tokens.map((tok) => `${fieldKey}.${tok}`);
+      }
+
       const field = fieldsStore.getField(parentCollection, fieldKey);
 
       if (!field) return fieldKey;
