@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { isRelational, parseTemplateTokens, resolveTargetCollection } from '@/utils/displayHeuristics';
+import {
+  isRelational,
+  parseTemplateTokens,
+  resolveTargetCollection,
+  pickHeuristic,
+} from '@/utils/displayHeuristics';
 
 describe('isRelational', () => {
   it('returns true when meta.special includes m2o, o2m, m2m, m2a, files, translations', () => {
@@ -129,5 +134,119 @@ describe('resolveTargetCollection', () => {
     expect(resolveTargetCollection(field, relations as any, fields as any)).toBe(
       'parent_translations'
     );
+  });
+});
+
+describe('pickHeuristic', () => {
+  it('returns null for non-relational fields', () => {
+    const relations = { getRelationsForField: () => [] };
+    const fields = { getField: () => null };
+    const field = { meta: { special: [] } } as any;
+    expect(pickHeuristic(field, relations as any, fields as any)).toBe(null);
+  });
+
+  it('uses first_name + last_name for directus_users targets', () => {
+    const relations = {
+      getRelationsForField: () => [
+        { collection: 'parent', field: 'author', related_collection: 'directus_users' },
+      ],
+    };
+    const fields = { getField: () => ({ field: 'first_name' }) };
+    const field = {
+      collection: 'parent',
+      field: 'author',
+      meta: { special: ['m2o'] },
+    } as any;
+    expect(pickHeuristic(field, relations as any, fields as any)).toBe(
+      '{{first_name}} {{last_name}}'
+    );
+  });
+
+  it('uses {{title}} for directus_files when title exists', () => {
+    const relations = {
+      getRelationsForField: () => [
+        { collection: 'parent', field: 'avatar', related_collection: 'directus_files' },
+      ],
+    };
+    const fields = {
+      getField: (col: string, f: string) => (f === 'title' ? { field: 'title' } : null),
+    };
+    const field = {
+      collection: 'parent',
+      field: 'avatar',
+      meta: { special: ['files'] },
+    } as any;
+    expect(pickHeuristic(field, relations as any, fields as any)).toBe('{{title}}');
+  });
+
+  it('falls back to {{filename_download}} for directus_files without title', () => {
+    const relations = {
+      getRelationsForField: () => [
+        { collection: 'parent', field: 'avatar', related_collection: 'directus_files' },
+      ],
+    };
+    const fields = { getField: () => null };
+    const field = {
+      collection: 'parent',
+      field: 'avatar',
+      meta: { special: ['files'] },
+    } as any;
+    expect(pickHeuristic(field, relations as any, fields as any)).toBe('{{filename_download}}');
+  });
+
+  it('tries name → title → label on a custom collection', () => {
+    let getFieldCalls = 0;
+    const relations = {
+      getRelationsForField: () => [
+        { collection: 'parent', field: 'category', related_collection: 'categories' },
+      ],
+    };
+    const fields = {
+      getField: (col: string, f: string) => {
+        getFieldCalls++;
+        return f === 'title' ? { field: 'title' } : null;
+      },
+    };
+    const field = {
+      collection: 'parent',
+      field: 'category',
+      meta: { special: ['m2o'] },
+    } as any;
+    expect(pickHeuristic(field, relations as any, fields as any)).toBe('{{title}}');
+  });
+
+  it('returns null when no heuristic matches', () => {
+    const relations = {
+      getRelationsForField: () => [
+        { collection: 'parent', field: 'thing', related_collection: 'things' },
+      ],
+    };
+    const fields = { getField: () => null };
+    const field = {
+      collection: 'parent',
+      field: 'thing',
+      meta: { special: ['m2o'] },
+    } as any;
+    expect(pickHeuristic(field, relations as any, fields as any)).toBe(null);
+  });
+
+  it('returns null for translation fields (existing render path handles them)', () => {
+    const relations = {
+      getRelationsForField: () => [
+        {
+          collection: 'parent_translations',
+          field: 'parent_id',
+          related_collection: 'parent',
+          meta: { junction_field: 'languages_code' },
+        },
+      ],
+    };
+    const fields = { getField: () => ({ field: 'title' }) };
+    const field = {
+      collection: 'parent',
+      field: 'translations',
+      meta: { special: ['translations'] },
+    } as any;
+    expect(pickHeuristic(field, relations as any, fields as any)).toBe(null);
   });
 });

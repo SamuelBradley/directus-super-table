@@ -89,3 +89,36 @@ export function resolveTargetCollection(
   // Pure O2M: the related collection IS the target
   return rel.collection ?? null;
 }
+
+const HEURISTIC_FALLBACK_FIELDS = ['name', 'title', 'label'] as const;
+
+export function pickHeuristic(
+  field: { collection?: string; field?: string; meta?: { special?: string[] } } | null,
+  relationsStore: RelationsStoreLike,
+  fieldsStore: FieldsStoreLike
+): string | null {
+  if (!isRelational(field)) return null;
+
+  // Translations have their own client-side rendering path in EditableCellRelational
+  // (language-filtered before display). Heuristics would interfere; skip them.
+  if (field?.meta?.special?.includes('translations')) return null;
+
+  const target = resolveTargetCollection(field, relationsStore, fieldsStore);
+  if (!target) return null;
+
+  if (target === 'directus_users') {
+    return '{{first_name}} {{last_name}}';
+  }
+
+  if (target === 'directus_files') {
+    return fieldsStore.getField(target, 'title') ? '{{title}}' : '{{filename_download}}';
+  }
+
+  for (const candidate of HEURISTIC_FALLBACK_FIELDS) {
+    if (fieldsStore.getField(target, candidate)) {
+      return `{{${candidate}}}`;
+    }
+  }
+
+  return null;
+}
