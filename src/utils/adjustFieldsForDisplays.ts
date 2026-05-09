@@ -1,5 +1,6 @@
 // CORE CHANGES - Following original Directus approach
 import { useStores, useCollection } from '@directus/extensions-sdk';
+import type { ColumnDisplay } from '../composables/useColumnDisplays';
 
 /**
  * Helper function to get the related collection for a field
@@ -128,8 +129,13 @@ function getDisplayFieldsForRelation(
  */
 export function adjustFieldsForDisplays(
   fields: readonly string[],
-  parentCollection: string
+  parentCollection: string,
+  overrides: Record<string, ColumnDisplay> = {}
 ): string[] {
+  // Issue #48: `overrides` is wired into the .map() in Task 7. Reference it here
+  // to satisfy noUnusedParameters without changing behavior.
+  void overrides;
+
   // Get the stores, but handle the case where they're not available
   let fieldsStore: any = null;
   let relationsStore: any = null;
