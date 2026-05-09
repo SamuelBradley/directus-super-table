@@ -5,6 +5,50 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-05-09
+
+### Changed
+- Bumped 21 development dependencies to their latest patch versions within
+  current major ranges. No runtime API changes.
+
+### Updated Dependencies
+
+#### Directus
+- `@directus/extensions-sdk` 17.1.1 → 17.1.4
+- `@directus/types` 15.0.1 → 15.0.3
+- `@directus/utils` 13.4.0 → 13.4.1
+
+#### Vue ecosystem
+- `vue` 3.5.32 → 3.5.34
+- `vue-router` 5.0.4 → 5.0.6
+- `@vue/test-utils` 2.4.6 → 2.4.10
+- `@vitejs/plugin-vue` 6.0.5 → 6.0.6
+- `vue-tsc` 3.2.6 → 3.2.8
+
+#### Build & Test tooling
+- `vite` 8.0.3 → 8.0.11
+- `vitest` 4.1.2 → 4.1.5
+- `@vitest/coverage-v8` 4.1.2 → 4.1.5
+- `@vitest/ui` 4.1.2 → 4.1.5
+- `typescript` 6.0.2 → 6.0.3
+- `prettier` 3.8.1 → 3.8.3
+- `happy-dom` 20.8.9 → 20.9.0
+- `jsdom` 29.0.1 → 29.1.1
+
+#### Linting
+- `eslint` 10.2.0 → 10.3.0
+- `@typescript-eslint/eslint-plugin` 8.58.0 → 8.59.2
+- `@typescript-eslint/parser` 8.58.0 → 8.59.2
+- `eslint-plugin-vue` 10.8.0 → 10.9.1
+
+#### Types
+- `@types/node` 22.19.17 → 22.19.18 (intentionally kept on major 22 to match
+  the Docker container Node 22.18 and the CI matrix on 20.x / 22.x)
+
+### Node compatibility
+Common engine subset across all updated tooling: `>=20.19.0`, `>=22.13.0`,
+or `>=24.0.0`. Node 23 is excluded by `vitest` and `eslint`.
+
 ## [0.3.0] - 2026-05-09
 
 ### Added
