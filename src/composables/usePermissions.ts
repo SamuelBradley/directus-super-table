@@ -36,10 +36,18 @@ export function usePermissions() {
     return fields.includes(field);
   }
 
+  function getAccessibleLanguages(allLanguages: { code: string; name: string }[]): string[] {
+    if (!canAction('languages', 'read')) return [];
+    return allLanguages
+      .filter((lang) => canAction('languages', 'read', lang.code) || canAction('languages', 'read'))
+      .map((lang) => lang.code);
+  }
+
   return {
     canRead: (collection: string, field?: string) => canAction(collection, 'read', field),
     canUpdate: (collection: string, field?: string) => canAction(collection, 'update', field),
     canCreate: (collection: string) => canAction(collection, 'create'),
     canDelete: (collection: string) => canAction(collection, 'delete'),
+    getAccessibleLanguages,
   };
 }

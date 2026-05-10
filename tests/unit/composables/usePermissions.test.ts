@@ -51,3 +51,25 @@ describe('usePermissions.canRead', () => {
     expect(canRead('issue_37_test')).toBe(true);
   });
 });
+
+describe('usePermissions.getAccessibleLanguages', () => {
+  it('returns the list of language codes the user can read', () => {
+    mockPermissions.value = {
+      languages: { read: { access: 'partial', fields: ['*'] } },
+    };
+    const allLanguages = [
+      { code: 'de-DE', name: 'German' },
+      { code: 'en-GB', name: 'English' },
+      { code: 'fr-FR', name: 'Français' },
+    ];
+
+    const { getAccessibleLanguages } = usePermissions();
+    expect(getAccessibleLanguages(allLanguages)).toEqual(['de-DE', 'en-GB', 'fr-FR']);
+  });
+
+  it('returns empty array when user has no access to languages collection', () => {
+    mockPermissions.value = {};
+    const { getAccessibleLanguages } = usePermissions();
+    expect(getAccessibleLanguages([{ code: 'de-DE', name: 'German' }])).toEqual([]);
+  });
+});
