@@ -9,6 +9,11 @@ interface PermissionEntry {
   fields?: string[];
 }
 
+interface SanitizeOptions {
+  translationsCollection?: string;
+  accessibleLanguages?: string[];
+}
+
 interface PermissionsByCollection {
   [collection: string]: {
     [action in PermissionAction]?: PermissionEntry;
@@ -43,11 +48,36 @@ export function usePermissions() {
       .map((lang) => lang.code);
   }
 
+  function sanitizeFields(
+    collection: string,
+    fields: string[],
+    options: SanitizeOptions = {}
+  ): string[] {
+    return fields.filter((rawKey) => {
+      const [pathPart, lang] = rawKey.includes(':') ? rawKey.split(':') : [rawKey, null];
+      const segments = pathPart.split('.');
+      const rootField = segments[0];
+
+      if (!canAction(collection, 'read', rootField)) return false;
+
+      if (rootField === 'translations' && segments.length > 1) {
+        const subField = segments.slice(1).join('.');
+        const transCol = options.translationsCollection;
+        if (transCol && !canAction(transCol, 'read', subField)) return false;
+        if (lang && options.accessibleLanguages && !options.accessibleLanguages.includes(lang))
+          return false;
+      }
+
+      return true;
+    });
+  }
+
   return {
     canRead: (collection: string, field?: string) => canAction(collection, 'read', field),
     canUpdate: (collection: string, field?: string) => canAction(collection, 'update', field),
     canCreate: (collection: string) => canAction(collection, 'create'),
     canDelete: (collection: string) => canAction(collection, 'delete'),
     getAccessibleLanguages,
+    sanitizeFields,
   };
 }

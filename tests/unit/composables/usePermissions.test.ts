@@ -73,3 +73,55 @@ describe('usePermissions.getAccessibleLanguages', () => {
     expect(getAccessibleLanguages([{ code: 'de-DE', name: 'German' }])).toEqual([]);
   });
 });
+
+describe('usePermissions.sanitizeFields', () => {
+  beforeEach(() => {
+    mockPermissions.value = {
+      issue_37_test: {
+        read: { access: 'full', fields: ['id', 'title', 'translations'] },
+      },
+      issue_37_test_translations: {
+        read: { access: 'partial', fields: ['id', 'languages_code', 'text', 'description'] },
+      },
+    };
+  });
+
+  it('keeps fields the user can read', () => {
+    const { sanitizeFields } = usePermissions();
+    expect(sanitizeFields('issue_37_test', ['id', 'title'])).toEqual(['id', 'title']);
+  });
+
+  it('drops fields the user cannot read', () => {
+    const { sanitizeFields } = usePermissions();
+    expect(sanitizeFields('issue_37_test', ['id', 'title', 'thumbnail'])).toEqual(['id', 'title']);
+  });
+
+  it('keeps language-suffixed translation fields when sub-field is readable', () => {
+    const { sanitizeFields } = usePermissions();
+    expect(
+      sanitizeFields('issue_37_test', ['translations.text:de-DE', 'translations.text:en-GB'], {
+        translationsCollection: 'issue_37_test_translations',
+      })
+    ).toEqual(['translations.text:de-DE', 'translations.text:en-GB']);
+  });
+
+  it('drops language-suffixed fields when sub-field is not readable', () => {
+    mockPermissions.value.issue_37_test_translations.read.fields = ['id', 'languages_code', 'text'];
+    const { sanitizeFields } = usePermissions();
+    expect(
+      sanitizeFields('issue_37_test', ['translations.text:de-DE', 'translations.description:de-DE'], {
+        translationsCollection: 'issue_37_test_translations',
+      })
+    ).toEqual(['translations.text:de-DE']);
+  });
+
+  it('drops language-suffixed fields when language is not in accessibleLanguages', () => {
+    const { sanitizeFields } = usePermissions();
+    expect(
+      sanitizeFields('issue_37_test', ['translations.text:de-DE', 'translations.text:fr-FR'], {
+        translationsCollection: 'issue_37_test_translations',
+        accessibleLanguages: ['de-DE'],
+      })
+    ).toEqual(['translations.text:de-DE']);
+  });
+});
