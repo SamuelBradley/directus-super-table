@@ -571,7 +571,29 @@ function getTranslationFieldMetadata(fieldKey: string) {
 }
 
 const tableHeaders = computed(() => {
+  const accessibleLanguages = permissions.getAccessibleLanguages(languages.value);
+  const translationsCollection = relationsStore.getRelationsForField(
+    collection.value,
+    'translations'
+  )?.[0]?.collection;
+
   const activeFields = fields.value
+    .filter((rawKey: string) => {
+      // Permission gate: drop language-suffixed translation fields the user can't read
+      if (rawKey.includes(':')) {
+        const [path, lang] = rawKey.split(':');
+        if (path.startsWith('translations.')) {
+          if (accessibleLanguages.length > 0 && !accessibleLanguages.includes(lang)) return false;
+          const subField = path.split('.').slice(1).join('.');
+          if (translationsCollection && !permissions.canRead(translationsCollection, subField))
+            return false;
+        }
+      }
+      // Permission gate: drop main-collection fields the user can't read
+      const rootField = rawKey.split(':')[0].split('.')[0];
+      if (!permissions.canRead(collection.value, rootField)) return false;
+      return true;
+    })
     .map((key: string) => {
       // Check if field has language suffix (e.g., "translations.description:de-DE")
       let actualFieldKey = key;
