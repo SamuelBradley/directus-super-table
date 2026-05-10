@@ -380,6 +380,14 @@ const { languages, fetchLanguages } = useLanguageSelector();
 // Per page options for pagination
 const perPageOptions = PER_PAGE_OPTIONS;
 
+// Permissions composable + one-shot notification flag for sanitized filters.
+// Declared here (before any computed that references it) to avoid TDZ hazards
+// — Vue's reactive watchers track dependency reads eagerly during setup, and
+// any future watcher that touches the language picker would otherwise hit the
+// uninitialised binding.
+const permissions = usePermissions();
+const filterSanitizationNotified = ref(false);
+
 // Language items for v-select.
 // Uses the permission-store list (all languages the user can read in principle)
 // rather than the probe-based effectiveAccessibleLanguages — when adding columns
@@ -416,10 +424,6 @@ const hasTranslationFields = computed(() => {
 
 // Translation configuration
 const translationConfig = useTranslationConfig(layoutOptions);
-
-// Permissions composable + one-shot notification flag for sanitized filters
-const permissions = usePermissions();
-const filterSanitizationNotified = ref(false);
 
 // Layout Options
 const showToolbar = computed(() => layoutOptions.value?.showToolbar !== false);
