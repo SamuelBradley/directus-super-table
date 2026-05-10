@@ -404,9 +404,15 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { useStores } from '@directus/extensions-sdk';
 import { useTableApi } from '../composables/api';
+import { usePermissions } from '../composables/usePermissions';
 import TagEditor from './CellRenderers/TagEditor.vue';
 // Note: useDrawer might not be available in all versions, we'll use alternative approach
+
+const { useNotificationsStore } = useStores();
+const notificationsStore = useNotificationsStore();
+const permissions = usePermissions();
 
 interface Props {
   value: any;
@@ -581,9 +587,20 @@ watch(menuActive, (active) => {
       }
     }
 
-    // For file fields, open drawer immediately instead of popover
+    // For file fields, open drawer immediately instead of popover.
+    // Pre-check: the drawer needs read access to directus_files to render.
+    // Without it the drawer would appear empty / broken; surface a clear
+    // notification instead.
     if (isFileField.value) {
       menuActive.value = false; // Close the popover
+      if (!permissions.canRead('directus_files')) {
+        notificationsStore.add({
+          type: 'warning',
+          title: 'No file access',
+          text: "You don't have permission to browse files. Ask an admin to grant read access on directus_files.",
+        });
+        return;
+      }
       // Initialize values before opening file browser
       originalValue.value = props.value;
       localValue.value = props.value;
