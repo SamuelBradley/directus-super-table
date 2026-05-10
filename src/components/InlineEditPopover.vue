@@ -427,6 +427,7 @@ interface Props {
   editModeActive?: boolean;
   fieldEditWarning?: string;
   languageCodeField?: string;
+  permissionDenied?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -631,12 +632,8 @@ watch(menuActive, (active) => {
 
 // Methods
 function getFieldTooltip() {
-  // Only show tooltip in edit mode for non-editable fields
-  if (!props.editModeActive) {
-    return undefined;
-  }
-
-  // Show warning for partially supported or unsupported fields
+  if (!props.editModeActive) return undefined;
+  if (props.permissionDenied) return 'You do not have permission to edit this field';
   if (
     props.fieldSupportLevel === 'partial' ||
     props.fieldSupportLevel === 'none' ||
@@ -644,16 +641,12 @@ function getFieldTooltip() {
   ) {
     return props.fieldEditWarning || 'This field has limited or no inline editing support';
   }
-
   return undefined;
 }
 
 function shouldShowIcon() {
-  // Only show lock icons when edit mode is active and field is not editable
-  if (!props.editModeActive) {
-    return false;
-  }
-  // Only show icon for non-editable fields (lock indicator)
+  if (!props.editModeActive) return false;
+  if (props.permissionDenied) return true;
   return (
     props.fieldSupportLevel === 'none' ||
     props.fieldSupportLevel === 'readonly' ||
