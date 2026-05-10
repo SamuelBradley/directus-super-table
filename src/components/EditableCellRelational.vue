@@ -418,11 +418,14 @@ const isFieldEditableComputed = computed(() => {
   if (!collection) return false;
 
   if (actualFieldKey.value.startsWith('translations.')) {
-    // Translation sub-field: check update on the translations junction collection
+    // Translation sub-field: resolve the junction collection and check update permission.
+    // `collection` may already be the junction (when called from a translation cell whose
+    // field metadata.collection points at the junction) or the parent collection. Try the
+    // parent → junction lookup first; fall back to treating `collection` as the junction.
     const subField = actualFieldKey.value.split('.').slice(1).join('.');
-    const transRelations = relationsStore.getRelationsForField(collection, 'translations');
-    const transCollection = transRelations?.[0]?.collection;
-    if (transCollection && !permissions.canUpdate(transCollection, subField)) return false;
+    const parentRels = relationsStore.getRelationsForField(collection, 'translations');
+    const transCollection = parentRels?.[0]?.collection || collection;
+    if (!permissions.canUpdate(transCollection, subField)) return false;
   } else {
     if (!permissions.canUpdate(collection, actualFieldKey.value)) return false;
   }
@@ -439,9 +442,9 @@ const permissionDenied = computed(() => {
 
   if (actualFieldKey.value.startsWith('translations.')) {
     const subField = actualFieldKey.value.split('.').slice(1).join('.');
-    const transCollection = relationsStore.getRelationsForField(collection, 'translations')?.[0]
-      ?.collection;
-    return transCollection ? !permissions.canUpdate(transCollection, subField) : false;
+    const parentRels = relationsStore.getRelationsForField(collection, 'translations');
+    const transCollection = parentRels?.[0]?.collection || collection;
+    return !permissions.canUpdate(transCollection, subField);
   }
   return !permissions.canUpdate(collection, actualFieldKey.value);
 });
