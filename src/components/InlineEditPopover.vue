@@ -691,9 +691,9 @@ function handleCellClick(toggle: Function) {
 function formatDisplayValue(value: any): string {
   if (value === null || value === undefined) return '—';
 
-  // Defensive guard (issue #37 bug C): a translation-row object leaked through
-  // as the cell value (e.g. when sibling cells re-render while another cell's
-  // popover opens). Extract its `text` so we never render "[object Object]".
+  // Defensive guard: a translation-row object can leak through as the cell
+  // value (e.g. when a sibling re-renders while another cell's popover opens).
+  // Extract `text` so we never render "[object Object]".
   if (
     value &&
     typeof value === 'object' &&

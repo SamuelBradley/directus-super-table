@@ -1,20 +1,9 @@
 /**
- * Safely resolve a translation field value from an item's translations array.
- *
- * Issue #37 (Bug C): When the popover opens for one cell, sibling translation
- * cells could re-render with the full translation row object as their value,
- * which then renders as the literal string "[object Object]" through Vue's
- * default `String()` coercion.
- *
- * This helper centralizes the lookup and guards against the edge case where
- * the resolved sub-field value is itself an object that contains a `text`
- * property (e.g. accidentally double-nested translation rows).
- *
- * @param item - Parent item carrying the `translations` array
- * @param fieldPath - Field key including the leading `translations.` segment (e.g. `translations.text`)
- * @param language - Target language code (e.g. `en-GB`); when null, no lookup is attempted
- * @param languageCodeField - Field on each translation row holding the language code
- * @returns The primitive translation value, or null when no translation matches
+ * Resolve a single translation field value (e.g. `translations.text` for a
+ * given language). Centralised so a sibling cell re-rendering during a popover
+ * open cannot leak the whole translation row through Vue's `String()`
+ * coercion as `"[object Object]"` — the final guard unwraps the row when it
+ * accidentally arrives in place of the sub-field value.
  */
 export function resolveTranslationValue(
   item: any,

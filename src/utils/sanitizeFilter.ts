@@ -7,15 +7,10 @@ export interface SanitizeResult {
 
 export interface SanitizeFilterOptions {
   /**
-   * Map from a parent-field name to the collection it nests into.
-   * When the walker traverses into the value of a field listed here,
-   * inner field names will be checked against the nested collection's
-   * permissions instead of the outer scope.
-   *
-   * Example: `{ translations: 'pages_translations' }`
-   *  - Top-level `translations` is checked against the parent collection.
-   *  - Sub-fields inside relation match operators (`_some`, `_none`, `_every`)
-   *    are checked against `pages_translations`.
+   * Maps a parent-field name (e.g. `translations`) to the collection its
+   * sub-fields live in (e.g. `pages_translations`). When the walker descends
+   * into a `_some`/`_none`/`_every` value under that field, sub-fields are
+   * checked against the nested collection instead of the outer scope.
    */
   nestedScopes?: Record<string, string | undefined>;
 }
@@ -24,18 +19,13 @@ const LOGICAL_KEYS = new Set(['_and', '_or']);
 const RELATION_MATCH_OPS = new Set(['_some', '_none', '_every']);
 
 /**
- * Walk a Directus filter tree and remove conditions that reference fields
- * the caller can't read. Logical operators (`_and`, `_or`) collapse if all
- * their branches are dropped. Relation match operators (`_some`, `_none`,
- * `_every`) recurse into a nested scope when configured via `nestedScopes`,
- * so e.g. `{ translations: { _some: { description: ... } } }` is checked
- * both at the parent level (translations field readable?) and at the
- * junction collection level (description field readable?).
- *
- * The `canRead` callback receives `(field, scope?)`. When `scope` is
- * undefined, the caller should check against the outer/parent collection.
- * When `scope` is set (matches a value from `nestedScopes`), the caller
- * should check against that collection.
+ * Walk a Directus filter tree and remove conditions on fields the caller
+ * cannot read. `_and`/`_or` branches collapse when emptied. Relation match
+ * operators (`_some`/`_none`/`_every`) descend into the configured nested
+ * scope so e.g. `{ translations: { _some: { description: ... } } }` is
+ * checked at both the parent level (`translations` readable?) and the
+ * junction-collection level (`description` readable?). The `canRead`
+ * callback receives the current `scope` (undefined = parent collection).
  */
 export function sanitizeFilter(
   filter: FilterValue,

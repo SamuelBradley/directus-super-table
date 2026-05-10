@@ -184,4 +184,27 @@ describe('usePermissions.sanitizeFields', () => {
       })
     ).toEqual(['translations.text:de-DE']);
   });
+
+  // Documents the contract: sanitizeFields treats every field the same way,
+  // including structural fields like the primary key and translation language
+  // code. The `fieldsWithRelational` caller in super-table.vue relies on this
+  // to fall back gracefully — when the user lacks read permission on the PK,
+  // sanitize drops it, the API request omits it, and the layout degrades the
+  // same way native Directus does (items render with limited interaction
+  // instead of an empty 403 error state).
+  it('drops the primary key when it is not in the read whitelist (graceful degradation)', () => {
+    mockPermissions.value.issue_37_test.read.fields = ['title'];
+    const { sanitizeFields } = usePermissions();
+    expect(sanitizeFields('issue_37_test', ['id', 'title'])).toEqual(['title']);
+  });
+
+  it('drops translations.languages_code when sub-field is not in the junction whitelist (graceful degradation)', () => {
+    mockPermissions.value.issue_37_test_translations.read.fields = ['id', 'text'];
+    const { sanitizeFields } = usePermissions();
+    expect(
+      sanitizeFields('issue_37_test', ['translations.languages_code', 'translations.text'], {
+        translationsCollection: 'issue_37_test_translations',
+      })
+    ).toEqual(['translations.text']);
+  });
 });

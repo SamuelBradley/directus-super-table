@@ -388,12 +388,10 @@ const perPageOptions = PER_PAGE_OPTIONS;
 const permissions = usePermissions();
 const filterSanitizationNotified = ref(false);
 
-// Language items for v-select.
-// Uses the permission-store list (all languages the user can read in principle)
-// rather than the probe-based effectiveAccessibleLanguages — when adding columns
-// we want to offer every language the user could ever see, not just ones with
-// data right now. Column rendering itself still uses the stricter probe-based
-// list for tableHeaders/sanitizeFields.
+// "Add column" picker uses the permission-store list (every language the user
+// could ever see) rather than the probe-based `effectiveAccessibleLanguages`,
+// so empty languages still appear as options. Header rendering keeps the
+// stricter probe list.
 const languageItems = computed(() => {
   const baseList =
     languages.value && languages.value.length > 0 ? languages.value : DEFAULT_LANGUAGES;
@@ -449,8 +447,8 @@ const sortAllowed = computed(() => {
 // Use pagination composable
 const { page, limit } = useTablePagination(layoutQuery as any);
 
-// Use sort composable — pass collection + fieldsStore so stale sort fields
-// referencing deleted columns are silently dropped (issue #47).
+// Pass collection + fieldsStore so stale sort fields referencing deleted
+// columns are silently dropped instead of triggering 400s on the next fetch.
 const { sort, tableSort, onSortChange } = useTableSort(
   layoutQuery as any,
   collection as Ref<string | null>,
@@ -508,11 +506,9 @@ const { aliasedFields, aliasQuery, getFromAliasedItem } = useAliasFields(
   columnDisplaysRef
 );
 
-// Translation collection lookup (parent → junction). Used both for the
-// permission gate and for the row-level language probe below.
-// Declared AFTER `fields` is initialized because `hasTranslationFields`
-// reads `fields.value` and Vue's watcher in useTranslationLanguages tracks
-// dependencies eagerly during setup.
+// Must be declared after `fields` / `hasTranslationFields` so the watcher
+// inside `useTranslationLanguages` doesn't touch them before initialisation
+// (Vue tracks reactive dependencies eagerly during setup → TDZ otherwise).
 const translationsCollectionRef = computed<string | null>(() => {
   if (!hasTranslationFields.value) return null;
   return (
@@ -520,20 +516,14 @@ const translationsCollectionRef = computed<string | null>(() => {
   );
 });
 
-// Probe which languages the user can actually read from translations rows.
-// `languages` collection permission is just a proxy — when admins restrict
-// translations row-by-row (e.g. via `languages_code._in: [de-DE, en-GB]`),
-// the probe is the only way to know exact accessible languages.
+// Probe wins over the static permission-store lookup because Directus does
+// not expose row-level filters (e.g. `languages_code._in: [de-DE, en-GB]`)
+// via /permissions/me — the aggregate query is the only way to discover them.
 const { probedLanguages } = useTranslationLanguages(
   translationsCollectionRef,
   computed(() => translationConfig.value.languageCodeField)
 );
 
-// Effective list of accessible languages.
-//   1. Probe result, when available — most accurate (covers row-level filter).
-//   2. Permission-store `getAccessibleLanguages` fallback when probe returned
-//      null (collection empty, probe failed, no translations).
-//   3. Empty array when neither source has data (defense in depth: no filter).
 const effectiveAccessibleLanguages = computed<string[]>(() => {
   if (probedLanguages.value && probedLanguages.value.length > 0) {
     return probedLanguages.value;
@@ -550,22 +540,21 @@ const fieldsWithRelational = computed(() => {
     return aliasInfo.fields || [aliasInfo.key];
   });
 
-  // Remove duplicates
   const adjustedFields = [...new Set(allDisplayFields)];
 
-  // CRITICAL: Always include the primary key field for navigation and identification
+  // PK + language-code path are added BEFORE the permission gate so sanitize
+  // can drop them when the user lacks read access — matches native Directus,
+  // where `useCollection.primaryKeyField` is permission-filtered and a denied
+  // PK simply degrades interaction (no item-key, no inline edit) rather than
+  // 403'ing the entire fetch.
   const pkField = getPrimaryKeyFieldName();
-  if (!adjustedFields.includes(pkField)) {
-    adjustedFields.unshift(pkField); // Add at the beginning
+  if (!adjustedFields.includes(pkField)) adjustedFields.unshift(pkField);
+
+  if (hasTranslationFields.value) {
+    const languageFieldPath = getTranslationLanguageFieldPath(translationConfig.value);
+    if (!adjustedFields.includes(languageFieldPath)) adjustedFields.push(languageFieldPath);
   }
 
-  // Ensure language code field is included for translations
-  const languageFieldPath = getTranslationLanguageFieldPath(translationConfig.value);
-  if (hasTranslationFields.value && !adjustedFields.includes(languageFieldPath)) {
-    adjustedFields.push(languageFieldPath);
-  }
-
-  // Permission gate: drop fields/language-suffixed entries the user cannot read
   const translationsCollection = relationsStore.getRelationsForField(
     props.collection,
     'translations'
@@ -921,13 +910,11 @@ const sanitizedFilterResult = computed(() => {
     filters.length === 0 ? undefined : filters.length === 1 ? filters[0] : { _and: filters };
   if (!merged) return { sanitized: undefined, removed: [] as string[] };
 
-  // Permission check is scope-aware: when the walker descends into the
-  // translations junction (via `_some`/`_none`/`_every`), `scope` will be
-  // the junction collection name and we check sub-field permissions there
-  // instead of on the parent collection. Without this, a filter like
-  // `{ translations: { _some: { description: ... } } }` would slip past
-  // the parent `canRead('translations')` check and hit the server with a
-  // sub-field the user can't read — re-opening Bug E for nested filters.
+  // `nestedScopes` makes the walker check sub-fields under `_some`/`_none`/
+  // `_every` against the junction collection rather than the parent —
+  // without it, `{ translations: { _some: { description: ... } } }` would
+  // slip past the parent's `canRead('translations')` check and reach the
+  // server with a sub-field the user cannot read.
   const nestedScopes: Record<string, string | undefined> = {
     translations: translationsCollectionRef.value ?? undefined,
   };

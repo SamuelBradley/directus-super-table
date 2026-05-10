@@ -257,9 +257,9 @@ const displayValue = computed(() => {
     return props.edits;
   }
 
-  // Special handling for translations fields (issue #37 bug C)
-  // Delegated to a centralized helper to guard against translation-row objects
-  // leaking through and rendering as the literal "[object Object]".
+  // Translation sub-fields go through the centralised helper so a sibling
+  // re-render during a popover open cannot leak a whole translation row
+  // through as "[object Object]".
   if (actualFieldKey.value.includes('translations.')) {
     return resolveTranslationValue(
       props.item,
@@ -269,10 +269,8 @@ const displayValue = computed(() => {
     );
   }
 
-  // Handle relational fields with display templates.
-  // Resolved priority: override → field-display → heuristic → none.
-  // Issue #48: layout-level override (columnDisplays) takes priority over the
-  // field-settings display.
+  // Display-template resolution priority: column-display override →
+  // field's own display template → relational heuristic → none.
   const storageKey = props.fieldKey.includes(':') ? props.fieldKey.split(':')[0] : props.fieldKey;
   const override = props.columnDisplays?.[storageKey];
   const fieldTemplate =

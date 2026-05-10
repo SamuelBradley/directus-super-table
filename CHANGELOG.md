@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `combinedFilter` no longer mixes side-effects with computed evaluation; the user notification is now emitted from a dedicated watcher.
 - `PermissionAction` union no longer includes the unused `'share'` action.
 - `usePermissions` guards against array-shaped permission stores (legacy / future Directus shape changes) instead of silently failing.
+- `fieldsWithRelational` clarifies its behaviour: the primary key and translation language code path are added BEFORE the permission gate, and sanitize drops them only if the user lacks read permission. This mirrors native Directus's `useCollection.primaryKeyField`, which is itself permission-filtered, so users without PK read access see the same graceful degradation in both layouts (items render with limited interaction) instead of an empty 403 error state.
 
 ### Known limitations
 - Bulk-action **Edit / Delete / Add Item** buttons (rendered by Directus Core, not by this extension) remain visible-but-disabled when the user lacks the corresponding permission. A future Directus core PR is required to fully hide them.
