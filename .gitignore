@@ -18,3 +18,6 @@ live-test-*.png
 tags-vs-real-tags.png
 status-cell-debug.png
 current-page.png
+issue-37-*.png
+step*.png
+test*-*.png
