@@ -921,7 +921,21 @@ const sanitizedFilterResult = computed(() => {
     filters.length === 0 ? undefined : filters.length === 1 ? filters[0] : { _and: filters };
   if (!merged) return { sanitized: undefined, removed: [] as string[] };
 
-  return sanitizeFilter(merged, (field: string) => permissions.canRead(collection.value, field));
+  // Permission check is scope-aware: when the walker descends into the
+  // translations junction (via `_some`/`_none`/`_every`), `scope` will be
+  // the junction collection name and we check sub-field permissions there
+  // instead of on the parent collection. Without this, a filter like
+  // `{ translations: { _some: { description: ... } } }` would slip past
+  // the parent `canRead('translations')` check and hit the server with a
+  // sub-field the user can't read — re-opening Bug E for nested filters.
+  const nestedScopes: Record<string, string | undefined> = {
+    translations: translationsCollectionRef.value ?? undefined,
+  };
+  return sanitizeFilter(
+    merged,
+    (field, scope) => permissions.canRead(scope ?? collection.value, field),
+    { nestedScopes }
+  );
 });
 
 const combinedFilter = computed(() => (sanitizedFilterResult.value.sanitized ?? undefined) as any);
