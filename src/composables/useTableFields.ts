@@ -2,6 +2,7 @@ import { ref, Ref } from 'vue';
 import type { Field } from '@directus/types';
 import { useExistingLanguageDetection } from './useExistingLanguageDetection';
 import type { Language } from '../types/table.types';
+import { getTranslationFieldMetadata } from '../utils/resolveTranslationsCollection';
 
 export function useTableFields(
   fields: Ref<string[]>,
@@ -56,34 +57,6 @@ export function useTableFields(
     return field?.name || fieldKey;
   }
 
-  // Helper function for translation field metadata
-  function getTranslationFieldMetadata(fieldKey: string) {
-    if (fieldKey.startsWith('translations.')) {
-      const subFieldName = fieldKey.split('.')[1];
-
-      // Find the translations relation
-      const relationsForField = relationsStore.getRelationsForField(
-        collection.value,
-        'translations'
-      );
-
-      if (relationsForField && relationsForField.length > 0) {
-        const relation = relationsForField[0];
-        // For O2M translations, the related collection contains the field definitions
-        const translationsCollection = relation.related_collection || relation.collection;
-
-        if (translationsCollection) {
-          // Get field metadata from the translations collection
-          const translationField = fieldsStore.getField(translationsCollection, subFieldName);
-          if (translationField) {
-            return translationField;
-          }
-        }
-      }
-    }
-    return null;
-  }
-
   // Rename field functions
   function renameField(fieldKey: string) {
     renameFieldKey.value = fieldKey;
@@ -98,7 +71,12 @@ export function useTableFields(
 
       // Special handling for translation fields
       if (actualFieldKey.startsWith('translations.') && !field) {
-        const translationField = getTranslationFieldMetadata(actualFieldKey);
+        const translationField = getTranslationFieldMetadata(
+          collection.value,
+          actualFieldKey,
+          fieldsStore,
+          relationsStore
+        );
         if (translationField) {
           field = translationField;
         }

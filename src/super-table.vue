@@ -291,6 +291,8 @@ import { useTableFields } from './composables/useTableFields';
 import { useFilterPresets } from './composables/useFilterPresets';
 import { usePermissions } from './composables/usePermissions';
 import { useTranslationLanguages } from './composables/useTranslationLanguages';
+import { getTranslationFieldMetadata } from './utils/resolveTranslationsCollection';
+import { buildSearchFilter } from './utils/buildSearchFilter';
 import {
   useTranslationConfig,
   getTranslationLanguageFieldPath,
@@ -571,41 +573,6 @@ const fieldsWithRelational = computed(() => {
 });
 
 // Table headers with relational field support
-// Helper function to get translation field metadata
-function getTranslationFieldMetadata(fieldKey: string) {
-  if (fieldKey.startsWith('translations.')) {
-    const subFieldName = fieldKey.split('.')[1];
-
-    // Find the translations relation
-    const relationsForField = relationsStore.getRelationsForField(collection.value, 'translations');
-
-    if (relationsForField && relationsForField.length > 0) {
-      const relation = relationsForField[0];
-      // For O2M translations, the related collection contains the field definitions
-      const translationsCollection = relation.related_collection || relation.collection;
-
-      if (translationsCollection) {
-        // Get field metadata from the translations collection
-        const translationField = fieldsStore.getField(translationsCollection, subFieldName);
-        if (translationField) {
-          return translationField;
-        }
-      }
-    }
-
-    // Fallback: Common translation field types
-    const commonTranslationFields: Record<string, any> = {
-      description: { type: 'text', meta: { interface: 'input-rich-text-html' } },
-      content: { type: 'text', meta: { interface: 'input-rich-text-html' } },
-      title: { type: 'string', meta: { interface: 'input' } },
-      name: { type: 'string', meta: { interface: 'input' } },
-      subtitle: { type: 'string', meta: { interface: 'input' } },
-    };
-
-    return commonTranslationFields[subFieldName] || null;
-  }
-  return null;
-}
 
 const tableHeaders = computed(() => {
   const accessibleLanguages = effectiveAccessibleLanguages.value;
@@ -641,7 +608,12 @@ const tableHeaders = computed(() => {
 
       // Special handling for translation fields
       if (actualFieldKey.startsWith('translations.') && !fieldData) {
-        const translationField = getTranslationFieldMetadata(actualFieldKey);
+        const translationField = getTranslationFieldMetadata(
+          collection.value,
+          actualFieldKey,
+          fieldsStore,
+          relationsStore
+        );
         if (translationField) {
           fieldData = {
             ...translationField,
@@ -784,134 +756,17 @@ const onSearchInput = debounce((val: string) => {
   emit('update:search', val);
 }, 300);
 
-// Build search filter for all fields including translations
-function buildSearchFilter(query: string) {
-  if (!query || query.trim() === '') return null;
-
-  const searchValue = query.trim();
-  const conditions: any[] = [];
-  const processedFields = new Set<string>(); // Track processed fields to avoid duplicates
-
-  // Helper function to check if a string is a valid UUID
-  const isValidUUID = (str: string) => {
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    return uuidRegex.test(str);
-  };
-
-  // Helper function to check if a string is a valid integer
-  const isValidInteger = (str: string) => {
-    return /^\d+$/.test(str);
-  };
-
-  // Check if the search value is a valid UUID or integer
-  const searchIsUUID = isValidUUID(searchValue);
-  const searchIsInteger = isValidInteger(searchValue);
-  const searchAsInteger = searchIsInteger ? parseInt(searchValue, 10) : null;
-
-  // Process each visible field
-  fields.value.forEach((fieldKey: string) => {
-    // Remove language suffix if present (e.g., "translations.description:de-DE" -> "translations.description")
-    const actualFieldKey = fieldKey.includes(':') ? fieldKey.split(':')[0] : fieldKey;
-
-    // Skip if we've already processed this field (prevents duplicates from multi-language fields)
-    if (processedFields.has(actualFieldKey)) {
-      return;
-    }
-    processedFields.add(actualFieldKey);
-
-    if (actualFieldKey.includes('.')) {
-      // Handle relational fields
-      const parts = actualFieldKey.split('.');
-      const rootField = parts[0];
-      const nestedField = parts.slice(1).join('.');
-
-      if (rootField === 'translations') {
-        // For translations, always search in ALL languages
-        // This ensures users can find content regardless of the displayed language
-        conditions.push({
-          translations: {
-            _some: {
-              [nestedField]: {
-                _icontains: searchValue,
-              },
-            },
-          },
-        });
-      } else {
-        // Other relational fields
-        conditions.push({
-          [actualFieldKey]: {
-            _icontains: searchValue,
-          },
-        });
-      }
-    } else {
-      // Direct fields - check if it's a searchable type
-      const field = fieldsStore.getField(collection.value, actualFieldKey);
-      const searchableTypes = ['string', 'text'];
-
-      if (field && searchableTypes.includes(field.type)) {
-        conditions.push({
-          [actualFieldKey]: {
-            _icontains: searchValue,
-          },
-        });
-      } else if (field && field.type === 'uuid' && searchIsUUID) {
-        // For UUID fields, use _eq if the search value is a complete valid UUID
-        conditions.push({
-          [actualFieldKey]: {
-            _eq: searchValue,
-          },
-        });
-      } else if (field && field.type === 'integer' && searchIsInteger) {
-        // For integer fields (including ID), use _eq if the search value is a valid integer
-        conditions.push({
-          [actualFieldKey]: {
-            _eq: searchAsInteger,
-          },
-        });
-      }
-      // Note: UUID fields only support _eq, _neq, _in, _nin comparisons
-      // Integer fields support exact match with _eq when searching by number
-    }
-  });
-
-  // If no searchable fields, fallback to all string/text/uuid/integer fields
-  if (conditions.length === 0) {
-    fieldsInCollection.value.forEach((field: Field) => {
-      const searchableTypes = ['string', 'text'];
-
-      if (searchableTypes.includes(field.type) && !field.meta?.hidden) {
-        conditions.push({
-          [field.field]: {
-            _icontains: searchValue,
-          },
-        });
-      } else if (field.type === 'uuid' && !field.meta?.hidden && searchIsUUID) {
-        // Add UUID fields to search if we have a valid UUID
-        conditions.push({
-          [field.field]: {
-            _eq: searchValue,
-          },
-        });
-      } else if (field.type === 'integer' && !field.meta?.hidden && searchIsInteger) {
-        // Add integer fields (including ID) to search if we have a valid integer
-        conditions.push({
-          [field.field]: {
-            _eq: searchAsInteger,
-          },
-        });
-      }
-    });
-  }
-
-  return conditions.length > 0 ? { _or: conditions } : null;
-}
-
 // Computed search filter
-const searchFilter = computed(() => {
-  return buildSearchFilter(searchQuery.value);
-});
+const searchFilter = computed(() =>
+  buildSearchFilter({
+    query: searchQuery.value,
+    visibleFields: fields.value,
+    fieldsInCollection: fieldsInCollection.value,
+    collection: collection.value,
+    fieldsStore,
+    relationsStore,
+  })
+);
 
 // Build deep parameter for relational fields
 const deep = computed(() => {
