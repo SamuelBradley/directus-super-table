@@ -1010,8 +1010,11 @@ watch(
   { immediate: true, deep: true }
 );
 
-// Combine all filters: presets + manual + search
-const combinedFilter = computed(() => {
+// Combine all filters: presets + manual + search, then sanitize against
+// the user's read permissions. Computed stays pure; the user-facing
+// notification is emitted from a watcher to keep side-effects out of
+// reactivity-sensitive computations.
+const sanitizedFilterResult = computed(() => {
   const presetFilter = presetMergedFilters.value;
   const searchFilterValue = searchFilter.value;
 
@@ -1021,23 +1024,27 @@ const combinedFilter = computed(() => {
 
   const merged =
     filters.length === 0 ? undefined : filters.length === 1 ? filters[0] : { _and: filters };
-  if (!merged) return undefined;
+  if (!merged) return { sanitized: undefined, removed: [] as string[] };
 
-  const { sanitized, removed } = sanitizeFilter(merged, (field: string) =>
-    permissions.canRead(collection.value, field)
-  );
-
-  if (removed.length > 0 && !filterSanitizationNotified.value) {
-    notificationsStore.add({
-      type: 'info',
-      title: 'Filter partially applied',
-      text: `Some filter conditions were removed because you don't have access: ${removed.join(', ')}`,
-    });
-    filterSanitizationNotified.value = true;
-  }
-
-  return (sanitized ?? undefined) as any;
+  return sanitizeFilter(merged, (field: string) => permissions.canRead(collection.value, field));
 });
+
+const combinedFilter = computed(() => (sanitizedFilterResult.value.sanitized ?? undefined) as any);
+
+watch(
+  () => sanitizedFilterResult.value.removed,
+  (removed) => {
+    if (removed.length > 0 && !filterSanitizationNotified.value) {
+      notificationsStore.add({
+        type: 'info',
+        title: 'Filter partially applied',
+        text: `Some filter conditions were removed because you don't have access: ${removed.join(', ')}`,
+      });
+      filterSanitizationNotified.value = true;
+    }
+  },
+  { immediate: true }
+);
 
 // Items & Loading with proper fields and alias handling
 // Data fetching with new API
