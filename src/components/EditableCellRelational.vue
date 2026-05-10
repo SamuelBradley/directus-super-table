@@ -168,6 +168,7 @@ import ColorCell from './CellRenderers/ColorCell.vue';
 import TagCell from './TagCell.vue';
 import { isFieldEditable, getFieldEditWarning, getFieldSupportLevel } from '../utils/fieldSupport';
 import { pickHeuristic } from '../utils/displayHeuristics';
+import { resolveTranslationValue } from '../utils/resolveTranslationValue';
 import { usePermissions } from '../composables/usePermissions';
 
 const { useFieldsStore, useRelationsStore } = useStores();
@@ -256,33 +257,16 @@ const displayValue = computed(() => {
     return props.edits;
   }
 
-  // Special handling for translations fields
+  // Special handling for translations fields (issue #37 bug C)
+  // Delegated to a centralized helper to guard against translation-row objects
+  // leaking through and rendering as the literal "[object Object]".
   if (actualFieldKey.value.includes('translations.')) {
-    const translationField = actualFieldKey.value.split('.').slice(1).join('.');
-
-    // Check if translations exist and is an array
-    if (Array.isArray(props.item.translations) && props.item.translations.length > 0) {
-      // Use the language from field key (if specified) or the selected language
-      const targetLanguage = fieldLanguage.value;
-
-      if (targetLanguage) {
-        const languageField = props.languageCodeField || 'languages_code';
-        const translation = props.item.translations.find(
-          (t: any) => t[languageField] === targetLanguage
-        );
-
-        // Return the specific field value if translation exists
-        if (translation) {
-          return translation[translationField] || null;
-        }
-      }
-
-      // No translation for this language
-      return null;
-    }
-
-    // No translations available at all
-    return null;
+    return resolveTranslationValue(
+      props.item,
+      actualFieldKey.value,
+      fieldLanguage.value ?? null,
+      props.languageCodeField || 'languages_code'
+    );
   }
 
   // Handle relational fields with display templates.

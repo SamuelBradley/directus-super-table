@@ -674,6 +674,19 @@ function handleCellClick(toggle: Function) {
 function formatDisplayValue(value: any): string {
   if (value === null || value === undefined) return '—';
 
+  // Defensive guard (issue #37 bug C): a translation-row object leaked through
+  // as the cell value (e.g. when sibling cells re-render while another cell's
+  // popover opens). Extract its `text` so we never render "[object Object]".
+  if (
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    'text' in value &&
+    'languages_code' in value
+  ) {
+    return String((value as any).text ?? '—');
+  }
+
   // Handle hash/password fields - show dots instead of actual value
   if (
     props.fieldType === 'hash' ||
