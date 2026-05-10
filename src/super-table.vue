@@ -289,10 +289,12 @@ import { useTableEdits } from './composables/useTableEdits';
 import { useTablePagination } from './composables/useTablePagination';
 import { useTableFields } from './composables/useTableFields';
 import { useFilterPresets } from './composables/useFilterPresets';
+import { usePermissions } from './composables/usePermissions';
 import {
   useTranslationConfig,
   getTranslationLanguageFieldPath,
 } from './composables/useTranslationConfig';
+import { sanitizeFilter } from './utils/sanitizeFilter';
 import { PER_PAGE_OPTIONS } from './constants/pagination';
 import { DEFAULT_LANGUAGES } from './constants/languages';
 import EditableCellRelational from './components/EditableCellRelational.vue';
@@ -408,6 +410,10 @@ const hasTranslationFields = computed(() => {
 
 // Translation configuration
 const translationConfig = useTranslationConfig(layoutOptions);
+
+// Permissions composable + one-shot notification flag for sanitized filters
+const permissions = usePermissions();
+const filterSanitizationNotified = ref(false);
 
 // Layout Options
 const showToolbar = computed(() => layoutOptions.value?.showToolbar !== false);
@@ -981,18 +987,28 @@ const combinedFilter = computed(() => {
   const presetFilter = presetMergedFilters.value;
   const searchFilterValue = searchFilter.value;
 
-  const filters = [];
-
+  const filters: any[] = [];
   if (presetFilter) filters.push(presetFilter);
   if (searchFilterValue) filters.push(searchFilterValue);
 
-  if (filters.length === 0) return undefined;
-  if (filters.length === 1) return filters[0];
+  const merged =
+    filters.length === 0 ? undefined : filters.length === 1 ? filters[0] : { _and: filters };
+  if (!merged) return undefined;
 
-  // Combine all filters with AND logic
-  return {
-    _and: filters,
-  };
+  const { sanitized, removed } = sanitizeFilter(merged, (field: string) =>
+    permissions.canRead(collection.value, field)
+  );
+
+  if (removed.length > 0 && !filterSanitizationNotified.value) {
+    notificationsStore.add({
+      type: 'info',
+      title: 'Filter partially applied',
+      text: `Some filter conditions were removed because you don't have access: ${removed.join(', ')}`,
+    });
+    filterSanitizationNotified.value = true;
+  }
+
+  return (sanitized ?? undefined) as any;
 });
 
 // Items & Loading with proper fields and alias handling
