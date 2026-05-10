@@ -1,7 +1,7 @@
 import { useStores } from '@directus/extensions-sdk';
 import { unref } from 'vue';
 
-export type PermissionAction = 'read' | 'create' | 'update' | 'delete' | 'share';
+export type PermissionAction = 'read' | 'create' | 'update' | 'delete';
 export type PermissionAccess = 'full' | 'partial' | 'none';
 
 interface PermissionEntry {
@@ -20,14 +20,18 @@ interface PermissionsByCollection {
   };
 }
 
+function isPermissionsMap(value: unknown): value is PermissionsByCollection {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 export function usePermissions() {
   const { usePermissionsStore } = useStores();
   const permissionsStore = usePermissionsStore();
 
   function getEntry(collection: string, action: PermissionAction): PermissionEntry | null {
-    const map = unref(permissionsStore.permissions) as PermissionsByCollection | undefined;
-    const perms = map?.[collection];
-    return perms?.[action] ?? null;
+    const raw = unref(permissionsStore.permissions);
+    if (!isPermissionsMap(raw)) return null;
+    return raw[collection]?.[action] ?? null;
   }
 
   function canAction(collection: string, action: PermissionAction, field?: string): boolean {

@@ -52,6 +52,66 @@ describe('usePermissions.canRead', () => {
   });
 });
 
+describe('usePermissions.canUpdate / canCreate / canDelete', () => {
+  beforeEach(() => {
+    mockPermissions.value = {
+      issue_37_test: {
+        read: { access: 'full', fields: ['*'] },
+        update: { access: 'partial', fields: ['title', 'status'] },
+        create: { access: 'full' },
+        delete: { access: 'none' },
+      },
+    };
+  });
+
+  it('canUpdate returns true when field is in update whitelist', () => {
+    const { canUpdate } = usePermissions();
+    expect(canUpdate('issue_37_test', 'title')).toBe(true);
+  });
+
+  it('canUpdate returns false when field is not in update whitelist', () => {
+    const { canUpdate } = usePermissions();
+    expect(canUpdate('issue_37_test', 'thumbnail')).toBe(false);
+  });
+
+  it('canUpdate returns false when collection has no update entry', () => {
+    const { canUpdate } = usePermissions();
+    expect(canUpdate('unknown_collection', 'title')).toBe(false);
+  });
+
+  it('canCreate returns true when collection has create access', () => {
+    const { canCreate } = usePermissions();
+    expect(canCreate('issue_37_test')).toBe(true);
+  });
+
+  it('canCreate returns false when collection has no create entry', () => {
+    const { canCreate } = usePermissions();
+    expect(canCreate('unknown_collection')).toBe(false);
+  });
+
+  it('canDelete returns false when delete access is "none"', () => {
+    const { canDelete } = usePermissions();
+    expect(canDelete('issue_37_test')).toBe(false);
+  });
+});
+
+describe('usePermissions shape resilience', () => {
+  it('returns false when permissions store exposes an array (legacy shape)', () => {
+    mockPermissions.value = [] as any;
+    const { canRead, canUpdate, canCreate, canDelete } = usePermissions();
+    expect(canRead('issue_37_test', 'title')).toBe(false);
+    expect(canUpdate('issue_37_test', 'title')).toBe(false);
+    expect(canCreate('issue_37_test')).toBe(false);
+    expect(canDelete('issue_37_test')).toBe(false);
+  });
+
+  it('returns false when permissions store is null/undefined', () => {
+    mockPermissions.value = null as any;
+    const { canRead } = usePermissions();
+    expect(canRead('issue_37_test', 'title')).toBe(false);
+  });
+});
+
 describe('usePermissions.getAccessibleLanguages', () => {
   it('returns the list of language codes the user can read', () => {
     mockPermissions.value = {
