@@ -522,7 +522,15 @@ const fieldsWithRelational = computed(() => {
     adjustedFields.push(languageFieldPath);
   }
 
-  return adjustedFields;
+  // Permission gate: drop fields/language-suffixed entries the user cannot read
+  const translationsCollection = relationsStore.getRelationsForField(
+    props.collection,
+    'translations'
+  )?.[0]?.collection;
+  return permissions.sanitizeFields(props.collection, adjustedFields, {
+    translationsCollection,
+    accessibleLanguages: permissions.getAccessibleLanguages(languages.value),
+  });
 });
 
 // Table headers with relational field support
