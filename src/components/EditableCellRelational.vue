@@ -9,6 +9,7 @@
     :interface-type="'tags'"
     :interface-options="interfaceOptions"
     :is-editable="isFieldEditableComputed"
+    :permission-denied="permissionDenied"
     :is-relational="false"
     :auto-save="false"
     :saving="saving"
@@ -55,6 +56,7 @@
     :interface-type="getInterfaceType() || undefined"
     :interface-options="interfaceOptions"
     :is-editable="isFieldEditableComputed"
+    :permission-denied="permissionDenied"
     :is-relational="false"
     :auto-save="false"
     :language-code-field="props.languageCodeField"
@@ -166,10 +168,12 @@ import ColorCell from './CellRenderers/ColorCell.vue';
 import TagCell from './TagCell.vue';
 import { isFieldEditable, getFieldEditWarning, getFieldSupportLevel } from '../utils/fieldSupport';
 import { pickHeuristic } from '../utils/displayHeuristics';
+import { usePermissions } from '../composables/usePermissions';
 
 const { useFieldsStore, useRelationsStore } = useStores();
 const fieldsStore = useFieldsStore();
 const relationsStore = useRelationsStore();
+const permissions = usePermissions();
 
 const props = defineProps<{
   item: Item;
@@ -425,16 +429,37 @@ const resolvedDisplay = computed<ResolvedDisplay>(() => {
 const isFieldEditableComputed = computed(() => {
   if (!props.editMode) return false;
 
-  // Special case: translation fields should be editable if the base type is supported
+  // Permission check first — denies independent of field-support
+  const collection = props.field?.collection || props.item?.collection;
+  if (!collection) return false;
+
   if (actualFieldKey.value.startsWith('translations.')) {
-    // For now, allow editing of translation fields if edit mode is on
-    // The actual field support check will be done in the InlineEditPopover
-    return true;
+    // Translation sub-field: check update on the translations junction collection
+    const subField = actualFieldKey.value.split('.').slice(1).join('.');
+    const transRelations = relationsStore.getRelationsForField(collection, 'translations');
+    const transCollection = transRelations?.[0]?.collection;
+    if (transCollection && !permissions.canUpdate(transCollection, subField)) return false;
+  } else {
+    if (!permissions.canUpdate(collection, actualFieldKey.value)) return false;
   }
 
-  // Use the field support utility which already handles tags and other partial support fields
-  const editable = isFieldEditable(props.field, actualFieldKey.value);
-  return editable;
+  // Field-support check (unchanged)
+  if (actualFieldKey.value.startsWith('translations.')) return true;
+  return isFieldEditable(props.field, actualFieldKey.value);
+});
+
+const permissionDenied = computed(() => {
+  if (!props.editMode) return false;
+  const collection = props.field?.collection || props.item?.collection;
+  if (!collection) return false;
+
+  if (actualFieldKey.value.startsWith('translations.')) {
+    const subField = actualFieldKey.value.split('.').slice(1).join('.');
+    const transCollection = relationsStore.getRelationsForField(collection, 'translations')?.[0]
+      ?.collection;
+    return transCollection ? !permissions.canUpdate(transCollection, subField) : false;
+  }
+  return !permissions.canUpdate(collection, actualFieldKey.value);
 });
 
 // Get field edit warning message
