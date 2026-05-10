@@ -379,18 +379,16 @@ const perPageOptions = PER_PAGE_OPTIONS;
 
 // Language items for v-select
 const languageItems = computed(() => {
-  // If no languages loaded yet, use fallback
-  if (!languages.value || languages.value.length === 0) {
-    return DEFAULT_LANGUAGES.map((lang) => ({
+  const baseList =
+    languages.value && languages.value.length > 0 ? languages.value : DEFAULT_LANGUAGES;
+  const accessibleLanguages = permissions.getAccessibleLanguages(baseList as any);
+
+  return baseList
+    .filter((lang) => accessibleLanguages.length === 0 || accessibleLanguages.includes(lang.code))
+    .map((lang) => ({
       text: lang.name,
       value: lang.code,
     }));
-  }
-
-  return languages.value.map((lang) => ({
-    text: lang.name,
-    value: lang.code,
-  }));
 });
 
 // Existing languages for the dialog (based on pending translation field)
