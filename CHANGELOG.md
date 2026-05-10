@@ -5,6 +5,22 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.4.0 — Permission-aware layout (Issue #37)
+
+### Fixed
+- **Bug A:** Translation language columns the user cannot read are no longer rendered
+- **Bug B:** Inline-edit popover blocked on cells the user cannot update; tooltip explains
+- **Bug C:** `[object Object]` no longer leaks into translation cells when popover open
+- **Bug D:** Hauptcollection field permissions and translations field permissions handled consistently
+- **Bug E:** Filters referencing inaccessible fields are sanitized server-side; user notified
+- **Bug F:** Auto-resolved by Bug A — language code never leaks into header
+- **Bug G:** Bulk-action duplicate button hidden when user lacks create permission
+
+### Added
+- `usePermissions` composable as single source of truth for permission checks
+- `sanitizeFilter` utility for permission-aware filter trees
+- 403 errors during inline-save now surface as notifications instead of being swallowed
+
 ## [0.3.2] - 2026-05-09
 
 ### Fixed
