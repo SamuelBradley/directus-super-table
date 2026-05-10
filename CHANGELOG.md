@@ -15,11 +15,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Bug E:** Filters referencing inaccessible fields are sanitized server-side; user notified
 - **Bug F:** Auto-resolved by Bug A — language code never leaks into header
 - **Bug G:** Bulk-action duplicate button hidden when user lacks create permission
+- **L2 (post-audit):** Asymmetric permissions — when the `languages` collection is unrestricted but the translations junction has a row-level filter on `languages_code`, an aggregate-query probe now resolves the exact accessible languages (instead of `--` placeholder columns).
+- **L5 (post-audit):** File-browser drawer no longer renders empty when the user lacks read on `directus_files`. A clear warning notification fires instead.
 
 ### Added
 - `usePermissions` composable as single source of truth for permission checks
 - `sanitizeFilter` utility for permission-aware filter trees
+- `useTranslationLanguages` composable: probes the translations junction collection for accessible languages (covers row-level filters not exposed by `/permissions/me`)
 - 403 errors during inline-save now surface as notifications instead of being swallowed
+
+### Refactor
+- `combinedFilter` no longer mixes side-effects with computed evaluation; the user notification is now emitted from a dedicated watcher.
+- `PermissionAction` union no longer includes the unused `'share'` action.
+- `usePermissions` guards against array-shaped permission stores (legacy / future Directus shape changes) instead of silently failing.
+
+### Known limitations
+- Bulk-action **Edit / Delete / Add Item** buttons (rendered by Directus Core, not by this extension) remain visible-but-disabled when the user lacks the corresponding permission. A future Directus core PR is required to fully hide them.
 
 ## [0.3.2] - 2026-05-09
 
