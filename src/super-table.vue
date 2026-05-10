@@ -290,6 +290,7 @@ import { useTablePagination } from './composables/useTablePagination';
 import { useTableFields } from './composables/useTableFields';
 import { useFilterPresets } from './composables/useFilterPresets';
 import { usePermissions } from './composables/usePermissions';
+import { useTranslationLanguages } from './composables/useTranslationLanguages';
 import {
   useTranslationConfig,
   getTranslationLanguageFieldPath,
@@ -377,7 +378,12 @@ const { languages, fetchLanguages } = useLanguageSelector();
 // Per page options for pagination
 const perPageOptions = PER_PAGE_OPTIONS;
 
-// Language items for v-select
+// Language items for v-select.
+// Uses the permission-store list (all languages the user can read in principle)
+// rather than the probe-based effectiveAccessibleLanguages — when adding columns
+// we want to offer every language the user could ever see, not just ones with
+// data right now. Column rendering itself still uses the stricter probe-based
+// list for tableHeaders/sanitizeFields.
 const languageItems = computed(() => {
   const baseList =
     languages.value && languages.value.length > 0 ? languages.value : DEFAULT_LANGUAGES;
@@ -496,6 +502,39 @@ const { aliasedFields, aliasQuery, getFromAliasedItem } = useAliasFields(
   columnDisplaysRef
 );
 
+// Translation collection lookup (parent → junction). Used both for the
+// permission gate and for the row-level language probe below.
+// Declared AFTER `fields` is initialized because `hasTranslationFields`
+// reads `fields.value` and Vue's watcher in useTranslationLanguages tracks
+// dependencies eagerly during setup.
+const translationsCollectionRef = computed<string | null>(() => {
+  if (!hasTranslationFields.value) return null;
+  return (
+    relationsStore.getRelationsForField(collection.value, 'translations')?.[0]?.collection ?? null
+  );
+});
+
+// Probe which languages the user can actually read from translations rows.
+// `languages` collection permission is just a proxy — when admins restrict
+// translations row-by-row (e.g. via `languages_code._in: [de-DE, en-GB]`),
+// the probe is the only way to know exact accessible languages.
+const { probedLanguages } = useTranslationLanguages(
+  translationsCollectionRef,
+  computed(() => translationConfig.value.languageCodeField)
+);
+
+// Effective list of accessible languages.
+//   1. Probe result, when available — most accurate (covers row-level filter).
+//   2. Permission-store `getAccessibleLanguages` fallback when probe returned
+//      null (collection empty, probe failed, no translations).
+//   3. Empty array when neither source has data (defense in depth: no filter).
+const effectiveAccessibleLanguages = computed<string[]>(() => {
+  if (probedLanguages.value && probedLanguages.value.length > 0) {
+    return probedLanguages.value;
+  }
+  return permissions.getAccessibleLanguages(languages.value);
+});
+
 // Create fields for API query using the aliased fields (following original Directus pattern)
 const fieldsWithRelational = computed(() => {
   if (!props.collection) return [];
@@ -527,7 +566,7 @@ const fieldsWithRelational = computed(() => {
   )?.[0]?.collection;
   return permissions.sanitizeFields(props.collection, adjustedFields, {
     translationsCollection,
-    accessibleLanguages: permissions.getAccessibleLanguages(languages.value),
+    accessibleLanguages: effectiveAccessibleLanguages.value,
   });
 });
 
@@ -569,11 +608,8 @@ function getTranslationFieldMetadata(fieldKey: string) {
 }
 
 const tableHeaders = computed(() => {
-  const accessibleLanguages = permissions.getAccessibleLanguages(languages.value);
-  const translationsCollection = relationsStore.getRelationsForField(
-    collection.value,
-    'translations'
-  )?.[0]?.collection;
+  const accessibleLanguages = effectiveAccessibleLanguages.value;
+  const translationsCollection = translationsCollectionRef.value;
 
   const activeFields = fields.value
     .filter((rawKey: string) => {
