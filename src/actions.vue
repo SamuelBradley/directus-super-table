@@ -2,9 +2,8 @@
   <div class="action-buttons">
     <!-- Duplicate Button nur anzeigen wenn Items ausgewählt sind -->
     <v-button
-      v-if="hasSelection"
+      v-if="hasSelection && canDuplicate"
       v-tooltip.bottom="duplicateTooltip"
-      :disabled="!canDuplicate"
       icon
       rounded
       secondary
@@ -97,6 +96,7 @@ import { computed, ref } from 'vue';
 import { useStores, useCollection } from '@directus/extensions-sdk';
 import { useI18n } from 'vue-i18n';
 import { useTableApi } from './composables/api';
+import { usePermissions } from './composables/usePermissions';
 
 // Props from layout state
 const props = defineProps<{
@@ -118,6 +118,7 @@ const { t } = useI18n();
 const tableApi = useTableApi();
 const { useNotificationsStore } = useStores();
 const notificationsStore = useNotificationsStore();
+const permissions = usePermissions();
 
 // State for Save Filter Dialog
 const saveDialogActive = ref(false);
@@ -191,12 +192,7 @@ const hasNativeFilter = computed(() => {
   return true;
 });
 
-// Als Admin haben wir immer Create-Rechte, außer es wird explizit verboten
-// In Layout Extensions ist der Permissions-Check anders als in anderen Extensions
-const canDuplicate = computed(() => {
-  // Einfacher Check - wenn wir hier sind, haben wir vermutlich Rechte
-  return true;
-});
+const canDuplicate = computed(() => permissions.canCreate(props.collection));
 
 const duplicateTooltip = computed(() => {
   const count = props.selection?.length || 0;
