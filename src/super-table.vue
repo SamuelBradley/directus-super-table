@@ -45,7 +45,7 @@
     </div>
     <!-- Main Table -->
     <v-table
-      v-if="loading || (itemCount && itemCount > 0 && !error)"
+      v-if="loading || ((itemCount > 0 || items.length > 0) && !error)"
       ref="tableRef"
       v-model="selectionWritable"
       v-model:headers="tableHeadersWritable"
@@ -231,7 +231,7 @@
     </div>
 
     <!-- Pagination Footer -->
-    <div class="footer" v-if="itemCount && itemCount > 0">
+    <div class="footer" v-if="itemCount > 0 || items.length > 0">
       <div class="pagination">
         <v-pagination
           v-if="totalPages > 1"
