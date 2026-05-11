@@ -35,6 +35,18 @@ describe('usePermissions.canRead', () => {
     expect(canRead('issue_37_test', 'anything')).toBe(true);
   });
 
+  // Directus reports `access: 'full'` even when the field-level whitelist is
+  // a restricted subset — `fields` stays the authoritative gate.
+  it('honours the field whitelist even when access is reported as full', () => {
+    mockPermissions.value.issue_37_test.read = {
+      access: 'full',
+      fields: ['id', 'title'],
+    };
+    const { canRead } = usePermissions();
+    expect(canRead('issue_37_test', 'title')).toBe(true);
+    expect(canRead('issue_37_test', 'thumbnail')).toBe(false);
+  });
+
   it('returns false when collection has access "none"', () => {
     mockPermissions.value.issue_37_test.read.access = 'none';
     const { canRead } = usePermissions();

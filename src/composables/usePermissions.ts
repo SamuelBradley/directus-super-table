@@ -40,6 +40,10 @@ export function usePermissions() {
 
     if (!field) return true;
 
+    // `entry.fields` is the authoritative field-level whitelist. `access` is
+    // a coarser hint that Directus also reports as `'full'` for permissions
+    // whose `fields` is an explicit allow-list — so do NOT short-circuit on
+    // `access === 'full'` here, that would let denied fields through.
     const fields = entry.fields ?? [];
     if (fields.includes('*')) return true;
     return fields.includes(field);
