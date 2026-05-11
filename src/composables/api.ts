@@ -31,58 +31,34 @@ export function useTableApi() {
   const filterCount = ref(0);
 
   /**
-   * Fetch items from the API
+   * Fetch items from the API.
+   *
+   * Intentionally does NOT request `meta=filter_count,total_count`. The
+   * server resolves that meta block via `countDistinct(pk)` which 403s for
+   * users without read permission on the primary key — see `fetchItemCount`
+   * below for the count, which uses `count(*)` and works regardless.
    */
   async function fetchItems(options: ApiOptions): Promise<ApiResponse> {
     loading.value = true;
     error.value = null;
 
     try {
-      // Build query parameters
       const params: any = {
         fields: options.fields,
         page: options.page || 1,
         limit: options.limit || 100,
-        meta: 'filter_count,total_count',
       };
+      if (options.filter) params.filter = options.filter;
+      if (options.search) params.search = options.search;
+      if (options.sort && options.sort.length > 0) params.sort = options.sort;
+      if (options.deep) params.deep = options.deep;
+      if (options.alias) params.alias = options.alias;
 
-      // Add filter if provided
-      if (options.filter) {
-        params.filter = options.filter;
-      }
-
-      // Add search if provided
-      if (options.search) {
-        params.search = options.search;
-      }
-
-      // Add sort if provided
-      if (options.sort && options.sort.length > 0) {
-        params.sort = options.sort;
-      }
-
-      // Add deep parameters for relations
-      if (options.deep) {
-        params.deep = options.deep;
-      }
-
-      // Add alias parameters
-      if (options.alias) {
-        params.alias = options.alias;
-      }
-
-      // Make API request
       const response = await api.get(`/items/${options.collection}`, { params });
 
       if (response.data) {
         items.value = response.data.data || [];
-        totalCount.value = response.data.meta?.total_count || 0;
-        filterCount.value = response.data.meta?.filter_count || 0;
-
-        return {
-          data: items.value,
-          meta: response.data.meta,
-        };
+        return { data: items.value };
       }
 
       return { data: [] };
@@ -91,6 +67,34 @@ export function useTableApi() {
       throw err;
     } finally {
       loading.value = false;
+    }
+  }
+
+  /**
+   * Fetch the filter-count for the current query as a separate request.
+   *
+   * Uses `aggregate[count]=*` (SQL `COUNT(*)`) so it does not require read
+   * permission on the primary key — `meta=filter_count` and
+   * `aggregate[countDistinct]=<pk>` both 403 when the user lacks PK access.
+   * Returns the previous count on failure so a transient aggregate error
+   * doesn't reset pagination to zero.
+   */
+  async function fetchItemCount(
+    collection: string,
+    filter?: Filter,
+    search?: string
+  ): Promise<number> {
+    try {
+      const params: any = { aggregate: { count: '*' } };
+      if (filter) params.filter = filter;
+      if (search) params.search = search;
+      const response = await api.get(`/items/${collection}`, { params });
+      const count = Number(response.data?.data?.[0]?.count ?? 0);
+      filterCount.value = count;
+      totalCount.value = count;
+      return count;
+    } catch {
+      return filterCount.value;
     }
   }
 
@@ -514,6 +518,7 @@ export function useTableApi() {
     totalCount: computed(() => totalCount.value),
     filterCount: computed(() => filterCount.value),
     fetchItems,
+    fetchItemCount,
     updateItem,
     updateTranslation,
     deleteItems,

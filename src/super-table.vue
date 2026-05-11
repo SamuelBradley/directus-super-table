@@ -957,24 +957,30 @@ const totalPages = computed(() => {
   return Math.ceil(itemCount.value / limit.value);
 });
 
-// Fetch items function
+// Items + count are fetched as two separate requests so users without read
+// permission on the PK still see a populated table — `meta=filter_count`
+// resolves via `countDistinct(pk)` server-side and would 403, while
+// `aggregate[count]=*` (used by `fetchItemCount`) does not.
 async function getItems() {
   try {
-    const response = await tableApi.fetchItems({
-      collection: collection.value,
-      fields: fieldsWithRelational.value,
-      filter: combinedFilter.value,
-      sort: sort.value,
-      page: page.value,
-      limit: limit.value,
-      deep: deep.value,
-      alias: aliasQuery.value || undefined,
-    });
-
-    // Update our local items ref (not the one from tableApi)
-    items.value = response.data || [];
+    const [itemsResult] = await Promise.all([
+      tableApi.fetchItems({
+        collection: collection.value,
+        fields: fieldsWithRelational.value,
+        filter: combinedFilter.value,
+        sort: sort.value,
+        page: page.value,
+        limit: limit.value,
+        deep: deep.value,
+        alias: aliasQuery.value || undefined,
+      }),
+      tableApi
+        .fetchItemCount(collection.value, combinedFilter.value, searchQuery.value || undefined)
+        .catch(() => undefined),
+    ]);
+    items.value = itemsResult?.data || [];
   } catch {
-    // Error is handled by tableApi internally
+    // Items error already in tableApi.error; count is best-effort
   }
 }
 
