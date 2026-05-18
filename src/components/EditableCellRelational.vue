@@ -9,6 +9,7 @@
     :interface-type="'tags'"
     :interface-options="interfaceOptions"
     :is-editable="isFieldEditableComputed"
+    :permission-denied="permissionDenied"
     :is-relational="false"
     :auto-save="false"
     :saving="saving"
@@ -55,6 +56,7 @@
     :interface-type="getInterfaceType() || undefined"
     :interface-options="interfaceOptions"
     :is-editable="isFieldEditableComputed"
+    :permission-denied="permissionDenied"
     :is-relational="false"
     :auto-save="false"
     :language-code-field="props.languageCodeField"
@@ -166,10 +168,13 @@ import ColorCell from './CellRenderers/ColorCell.vue';
 import TagCell from './TagCell.vue';
 import { isFieldEditable, getFieldEditWarning, getFieldSupportLevel } from '../utils/fieldSupport';
 import { pickHeuristic } from '../utils/displayHeuristics';
+import { resolveTranslationValue } from '../utils/resolveTranslationValue';
+import { usePermissions } from '../composables/usePermissions';
 
 const { useFieldsStore, useRelationsStore } = useStores();
 const fieldsStore = useFieldsStore();
 const relationsStore = useRelationsStore();
+const permissions = usePermissions();
 
 const props = defineProps<{
   item: Item;
@@ -252,39 +257,20 @@ const displayValue = computed(() => {
     return props.edits;
   }
 
-  // Special handling for translations fields
+  // Translation sub-fields go through the centralised helper so a sibling
+  // re-render during a popover open cannot leak a whole translation row
+  // through as "[object Object]".
   if (actualFieldKey.value.includes('translations.')) {
-    const translationField = actualFieldKey.value.split('.').slice(1).join('.');
-
-    // Check if translations exist and is an array
-    if (Array.isArray(props.item.translations) && props.item.translations.length > 0) {
-      // Use the language from field key (if specified) or the selected language
-      const targetLanguage = fieldLanguage.value;
-
-      if (targetLanguage) {
-        const languageField = props.languageCodeField || 'languages_code';
-        const translation = props.item.translations.find(
-          (t: any) => t[languageField] === targetLanguage
-        );
-
-        // Return the specific field value if translation exists
-        if (translation) {
-          return translation[translationField] || null;
-        }
-      }
-
-      // No translation for this language
-      return null;
-    }
-
-    // No translations available at all
-    return null;
+    return resolveTranslationValue(
+      props.item,
+      actualFieldKey.value,
+      fieldLanguage.value ?? null,
+      props.languageCodeField || 'languages_code'
+    );
   }
 
-  // Handle relational fields with display templates.
-  // Resolved priority: override → field-display → heuristic → none.
-  // Issue #48: layout-level override (columnDisplays) takes priority over the
-  // field-settings display.
+  // Display-template resolution priority: column-display override →
+  // field's own display template → relational heuristic → none.
   const storageKey = props.fieldKey.includes(':') ? props.fieldKey.split(':')[0] : props.fieldKey;
   const override = props.columnDisplays?.[storageKey];
   const fieldTemplate =
@@ -425,16 +411,40 @@ const resolvedDisplay = computed<ResolvedDisplay>(() => {
 const isFieldEditableComputed = computed(() => {
   if (!props.editMode) return false;
 
-  // Special case: translation fields should be editable if the base type is supported
+  // Permission check first — denies independent of field-support
+  const collection = props.field?.collection || props.item?.collection;
+  if (!collection) return false;
+
   if (actualFieldKey.value.startsWith('translations.')) {
-    // For now, allow editing of translation fields if edit mode is on
-    // The actual field support check will be done in the InlineEditPopover
-    return true;
+    // Translation sub-field: resolve the junction collection and check update permission.
+    // `collection` may already be the junction (when called from a translation cell whose
+    // field metadata.collection points at the junction) or the parent collection. Try the
+    // parent → junction lookup first; fall back to treating `collection` as the junction.
+    const subField = actualFieldKey.value.split('.').slice(1).join('.');
+    const parentRels = relationsStore.getRelationsForField(collection, 'translations');
+    const transCollection = parentRels?.[0]?.collection || collection;
+    if (!permissions.canUpdate(transCollection, subField)) return false;
+  } else {
+    if (!permissions.canUpdate(collection, actualFieldKey.value)) return false;
   }
 
-  // Use the field support utility which already handles tags and other partial support fields
-  const editable = isFieldEditable(props.field, actualFieldKey.value);
-  return editable;
+  // Field-support check (unchanged)
+  if (actualFieldKey.value.startsWith('translations.')) return true;
+  return isFieldEditable(props.field, actualFieldKey.value);
+});
+
+const permissionDenied = computed(() => {
+  if (!props.editMode) return false;
+  const collection = props.field?.collection || props.item?.collection;
+  if (!collection) return false;
+
+  if (actualFieldKey.value.startsWith('translations.')) {
+    const subField = actualFieldKey.value.split('.').slice(1).join('.');
+    const parentRels = relationsStore.getRelationsForField(collection, 'translations');
+    const transCollection = parentRels?.[0]?.collection || collection;
+    return !permissions.canUpdate(transCollection, subField);
+  }
+  return !permissions.canUpdate(collection, actualFieldKey.value);
 });
 
 // Get field edit warning message

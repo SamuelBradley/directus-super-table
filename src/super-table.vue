@@ -45,7 +45,7 @@
     </div>
     <!-- Main Table -->
     <v-table
-      v-if="loading || (itemCount && itemCount > 0 && !error)"
+      v-if="loading || ((itemCount > 0 || items.length > 0) && !error)"
       ref="tableRef"
       v-model="selectionWritable"
       v-model:headers="tableHeadersWritable"
@@ -231,7 +231,7 @@
     </div>
 
     <!-- Pagination Footer -->
-    <div class="footer" v-if="itemCount && itemCount > 0">
+    <div class="footer" v-if="itemCount > 0 || items.length > 0">
       <div class="pagination">
         <v-pagination
           v-if="totalPages > 1"
@@ -289,12 +289,15 @@ import { useTableEdits } from './composables/useTableEdits';
 import { useTablePagination } from './composables/useTablePagination';
 import { useTableFields } from './composables/useTableFields';
 import { useFilterPresets } from './composables/useFilterPresets';
+import { usePermissions } from './composables/usePermissions';
+import { useTranslationLanguages } from './composables/useTranslationLanguages';
 import { getTranslationFieldMetadata } from './utils/resolveTranslationsCollection';
 import { buildSearchFilter } from './utils/buildSearchFilter';
 import {
   useTranslationConfig,
   getTranslationLanguageFieldPath,
 } from './composables/useTranslationConfig';
+import { sanitizeFilter } from './utils/sanitizeFilter';
 import { PER_PAGE_OPTIONS } from './constants/pagination';
 import { DEFAULT_LANGUAGES } from './constants/languages';
 import EditableCellRelational from './components/EditableCellRelational.vue';
@@ -377,20 +380,29 @@ const { languages, fetchLanguages } = useLanguageSelector();
 // Per page options for pagination
 const perPageOptions = PER_PAGE_OPTIONS;
 
-// Language items for v-select
+// Permissions composable + one-shot notification flag for sanitized filters.
+// Declared here (before any computed that references it) to avoid TDZ hazards
+// — Vue's reactive watchers track dependency reads eagerly during setup, and
+// any future watcher that touches the language picker would otherwise hit the
+// uninitialised binding.
+const permissions = usePermissions();
+const filterSanitizationNotified = ref(false);
+
+// "Add column" picker uses the permission-store list (every language the user
+// could ever see) rather than the probe-based `effectiveAccessibleLanguages`,
+// so empty languages still appear as options. Header rendering keeps the
+// stricter probe list.
 const languageItems = computed(() => {
-  // If no languages loaded yet, use fallback
-  if (!languages.value || languages.value.length === 0) {
-    return DEFAULT_LANGUAGES.map((lang) => ({
+  const baseList =
+    languages.value && languages.value.length > 0 ? languages.value : DEFAULT_LANGUAGES;
+  const accessibleLanguages = permissions.getAccessibleLanguages(baseList as any);
+
+  return baseList
+    .filter((lang) => accessibleLanguages.length === 0 || accessibleLanguages.includes(lang.code))
+    .map((lang) => ({
       text: lang.name,
       value: lang.code,
     }));
-  }
-
-  return languages.value.map((lang) => ({
-    text: lang.name,
-    value: lang.code,
-  }));
 });
 
 // Existing languages for the dialog (based on pending translation field)
@@ -435,8 +447,8 @@ const sortAllowed = computed(() => {
 // Use pagination composable
 const { page, limit } = useTablePagination(layoutQuery as any);
 
-// Use sort composable — pass collection + fieldsStore so stale sort fields
-// referencing deleted columns are silently dropped (issue #47).
+// Pass collection + fieldsStore so stale sort fields referencing deleted
+// columns are silently dropped instead of triggering 400s on the next fetch.
 const { sort, tableSort, onSortChange } = useTableSort(
   layoutQuery as any,
   collection as Ref<string | null>,
@@ -494,6 +506,31 @@ const { aliasedFields, aliasQuery, getFromAliasedItem } = useAliasFields(
   columnDisplaysRef
 );
 
+// Must be declared after `fields` / `hasTranslationFields` so the watcher
+// inside `useTranslationLanguages` doesn't touch them before initialisation
+// (Vue tracks reactive dependencies eagerly during setup → TDZ otherwise).
+const translationsCollectionRef = computed<string | null>(() => {
+  if (!hasTranslationFields.value) return null;
+  return (
+    relationsStore.getRelationsForField(collection.value, 'translations')?.[0]?.collection ?? null
+  );
+});
+
+// Probe wins over the static permission-store lookup because Directus does
+// not expose row-level filters (e.g. `languages_code._in: [de-DE, en-GB]`)
+// via /permissions/me — the aggregate query is the only way to discover them.
+const { probedLanguages } = useTranslationLanguages(
+  translationsCollectionRef,
+  computed(() => translationConfig.value.languageCodeField)
+);
+
+const effectiveAccessibleLanguages = computed<string[]>(() => {
+  if (probedLanguages.value && probedLanguages.value.length > 0) {
+    return probedLanguages.value;
+  }
+  return permissions.getAccessibleLanguages(languages.value);
+});
+
 // Create fields for API query using the aliased fields (following original Directus pattern)
 const fieldsWithRelational = computed(() => {
   if (!props.collection) return [];
@@ -503,28 +540,54 @@ const fieldsWithRelational = computed(() => {
     return aliasInfo.fields || [aliasInfo.key];
   });
 
-  // Remove duplicates
   const adjustedFields = [...new Set(allDisplayFields)];
 
-  // CRITICAL: Always include the primary key field for navigation and identification
+  // PK + language-code path are added BEFORE the permission gate so sanitize
+  // can drop them when the user lacks read access — matches native Directus,
+  // where `useCollection.primaryKeyField` is permission-filtered and a denied
+  // PK simply degrades interaction (no item-key, no inline edit) rather than
+  // 403'ing the entire fetch.
   const pkField = getPrimaryKeyFieldName();
-  if (!adjustedFields.includes(pkField)) {
-    adjustedFields.unshift(pkField); // Add at the beginning
+  if (!adjustedFields.includes(pkField)) adjustedFields.unshift(pkField);
+
+  if (hasTranslationFields.value) {
+    const languageFieldPath = getTranslationLanguageFieldPath(translationConfig.value);
+    if (!adjustedFields.includes(languageFieldPath)) adjustedFields.push(languageFieldPath);
   }
 
-  // Ensure language code field is included for translations
-  const languageFieldPath = getTranslationLanguageFieldPath(translationConfig.value);
-  if (hasTranslationFields.value && !adjustedFields.includes(languageFieldPath)) {
-    adjustedFields.push(languageFieldPath);
-  }
-
-  return adjustedFields;
+  const translationsCollection = relationsStore.getRelationsForField(
+    props.collection,
+    'translations'
+  )?.[0]?.collection;
+  return permissions.sanitizeFields(props.collection, adjustedFields, {
+    translationsCollection,
+    accessibleLanguages: effectiveAccessibleLanguages.value,
+  });
 });
 
 // Table headers with relational field support
 
 const tableHeaders = computed(() => {
+  const accessibleLanguages = effectiveAccessibleLanguages.value;
+  const translationsCollection = translationsCollectionRef.value;
+
   const activeFields = fields.value
+    .filter((rawKey: string) => {
+      // Permission gate: drop language-suffixed translation fields the user can't read
+      if (rawKey.includes(':')) {
+        const [path, lang] = rawKey.split(':');
+        if (path.startsWith('translations.')) {
+          if (accessibleLanguages.length > 0 && !accessibleLanguages.includes(lang)) return false;
+          const subField = path.split('.').slice(1).join('.');
+          if (translationsCollection && !permissions.canRead(translationsCollection, subField))
+            return false;
+        }
+      }
+      // Permission gate: drop main-collection fields the user can't read
+      const rootField = rawKey.split(':')[0].split('.')[0];
+      if (!permissions.canRead(collection.value, rootField)) return false;
+      return true;
+    })
     .map((key: string) => {
       // Check if field has language suffix (e.g., "translations.description:de-DE")
       let actualFieldKey = key;
@@ -831,24 +894,53 @@ watch(
   { immediate: true, deep: true }
 );
 
-// Combine all filters: presets + manual + search
-const combinedFilter = computed(() => {
+// Combine all filters: presets + manual + search, then sanitize against
+// the user's read permissions. Computed stays pure; the user-facing
+// notification is emitted from a watcher to keep side-effects out of
+// reactivity-sensitive computations.
+const sanitizedFilterResult = computed(() => {
   const presetFilter = presetMergedFilters.value;
   const searchFilterValue = searchFilter.value;
 
-  const filters = [];
-
+  const filters: any[] = [];
   if (presetFilter) filters.push(presetFilter);
   if (searchFilterValue) filters.push(searchFilterValue);
 
-  if (filters.length === 0) return undefined;
-  if (filters.length === 1) return filters[0];
+  const merged =
+    filters.length === 0 ? undefined : filters.length === 1 ? filters[0] : { _and: filters };
+  if (!merged) return { sanitized: undefined, removed: [] as string[] };
 
-  // Combine all filters with AND logic
-  return {
-    _and: filters,
+  // `nestedScopes` makes the walker check sub-fields under `_some`/`_none`/
+  // `_every` against the junction collection rather than the parent —
+  // without it, `{ translations: { _some: { description: ... } } }` would
+  // slip past the parent's `canRead('translations')` check and reach the
+  // server with a sub-field the user cannot read.
+  const nestedScopes: Record<string, string | undefined> = {
+    translations: translationsCollectionRef.value ?? undefined,
   };
+  return sanitizeFilter(
+    merged,
+    (field, scope) => permissions.canRead(scope ?? collection.value, field),
+    { nestedScopes }
+  );
 });
+
+const combinedFilter = computed(() => (sanitizedFilterResult.value.sanitized ?? undefined) as any);
+
+watch(
+  () => sanitizedFilterResult.value.removed,
+  (removed) => {
+    if (removed.length > 0 && !filterSanitizationNotified.value) {
+      notificationsStore.add({
+        type: 'info',
+        title: 'Filter partially applied',
+        text: `Some filter conditions were removed because you don't have access: ${removed.join(', ')}`,
+      });
+      filterSanitizationNotified.value = true;
+    }
+  },
+  { immediate: true }
+);
 
 // Items & Loading with proper fields and alias handling
 // Data fetching with new API
@@ -865,24 +957,30 @@ const totalPages = computed(() => {
   return Math.ceil(itemCount.value / limit.value);
 });
 
-// Fetch items function
+// Items + count are fetched as two separate requests so users without read
+// permission on the PK still see a populated table — `meta=filter_count`
+// resolves via `countDistinct(pk)` server-side and would 403, while
+// `aggregate[count]=*` (used by `fetchItemCount`) does not.
 async function getItems() {
   try {
-    const response = await tableApi.fetchItems({
-      collection: collection.value,
-      fields: fieldsWithRelational.value,
-      filter: combinedFilter.value,
-      sort: sort.value,
-      page: page.value,
-      limit: limit.value,
-      deep: deep.value,
-      alias: aliasQuery.value || undefined,
-    });
-
-    // Update our local items ref (not the one from tableApi)
-    items.value = response.data || [];
+    const [itemsResult] = await Promise.all([
+      tableApi.fetchItems({
+        collection: collection.value,
+        fields: fieldsWithRelational.value,
+        filter: combinedFilter.value,
+        sort: sort.value,
+        page: page.value,
+        limit: limit.value,
+        deep: deep.value,
+        alias: aliasQuery.value || undefined,
+      }),
+      tableApi
+        .fetchItemCount(collection.value, combinedFilter.value, searchQuery.value || undefined)
+        .catch(() => undefined),
+    ]);
+    items.value = itemsResult?.data || [];
   } catch {
-    // Error is handled by tableApi internally
+    // Items error already in tableApi.error; count is best-effort
   }
 }
 
