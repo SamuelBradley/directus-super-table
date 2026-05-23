@@ -146,3 +146,92 @@ describe('adjustFieldsForDisplays — M2M related-values display (issue #55)', (
     ).toBe(true);
   });
 });
+
+describe('adjustFieldsForDisplays — override branch M2M validation (issue #55)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('drops invalid override-template tokens for M2M when target lacks the field', async () => {
+    vi.doMock('@directus/extensions-sdk', () => ({
+      useStores: () => ({
+        useFieldsStore: () => ({
+          getField: (col: string, f: string) => {
+            if (col === 'parent' && f === 'tags')
+              return { field: 'tags', collection: 'parent', meta: { special: ['m2m'] } };
+            if (col === 'parent_tags' && f === 'tag_id')
+              return { field: 'tag_id', schema: { foreign_key_table: 'tags' } };
+            if (col === 'tags' && f === 'id') return { field: 'id' };
+            // CRITICAL: tags has no 'name'
+            return null;
+          },
+          getFieldsForCollection: () => [],
+        }),
+        useRelationsStore: () => ({
+          getRelationsForField: (col: string, f: string) =>
+            col === 'parent' && f === 'tags'
+              ? [
+                  {
+                    collection: 'parent_tags',
+                    field: 'parent_id',
+                    related_collection: 'parent',
+                    meta: { junction_field: 'tag_id' },
+                  },
+                ]
+              : [],
+        }),
+      }),
+      useCollection: () => ({ primaryKeyField: { value: { field: 'id' } } }),
+      useExtensions: () => ({ displays: { value: [] } }),
+    }));
+    const { adjustFieldsForDisplays } = await import('@/utils/adjustFieldsForDisplays');
+    const result = adjustFieldsForDisplays(
+      ['tags'],
+      'parent',
+      { tags: { template: '{{name}}' } }
+    );
+    // `name` does not exist on `tags` (the target) → must NOT appear in the path
+    expect(result).not.toContain('tags.tag_id.name');
+    expect(result).not.toContain('tags.name');
+  });
+
+  it('expands valid override-template tokens for M2M through junction_field', async () => {
+    vi.doMock('@directus/extensions-sdk', () => ({
+      useStores: () => ({
+        useFieldsStore: () => ({
+          getField: (col: string, f: string) => {
+            if (col === 'parent' && f === 'tags')
+              return { field: 'tags', collection: 'parent', meta: { special: ['m2m'] } };
+            if (col === 'parent_tags' && f === 'tag_id')
+              return { field: 'tag_id', schema: { foreign_key_table: 'tags' } };
+            if (col === 'tags' && f === 'label') return { field: 'label' };
+            return null;
+          },
+          getFieldsForCollection: () => [],
+        }),
+        useRelationsStore: () => ({
+          getRelationsForField: (col: string, f: string) =>
+            col === 'parent' && f === 'tags'
+              ? [
+                  {
+                    collection: 'parent_tags',
+                    field: 'parent_id',
+                    related_collection: 'parent',
+                    meta: { junction_field: 'tag_id' },
+                  },
+                ]
+              : [],
+        }),
+      }),
+      useCollection: () => ({ primaryKeyField: { value: { field: 'id' } } }),
+      useExtensions: () => ({ displays: { value: [] } }),
+    }));
+    const { adjustFieldsForDisplays } = await import('@/utils/adjustFieldsForDisplays');
+    const result = adjustFieldsForDisplays(
+      ['tags'],
+      'parent',
+      { tags: { template: '{{label}}' } }
+    );
+    expect(result).toContain('tags.tag_id.label');
+  });
+});

@@ -264,19 +264,15 @@ export function adjustFieldsForDisplays(
           return fieldKey;
         }
 
-        // M2M: paths must traverse the junction's junction_field.
-        const isM2M = fieldDef?.meta?.special?.includes('m2m');
-        if (isM2M) {
-          const relations = relationsStore?.getRelationsForField(parentCollection, fieldKey);
-          const junctionField = relations?.[0]?.meta?.junction_field;
-          if (junctionField) {
-            return tokens.map((tok) => `${fieldKey}.${junctionField}.${tok}`);
-          }
-          return [`${fieldKey}.${tokens[0]}`]; // best-effort fallback
-        }
-
-        // M2O / O2M / files: direct dotted paths
-        return tokens.map((tok) => `${fieldKey}.${tok}`);
+        const expanded = expandTokensThroughRelation(
+          fieldDef,
+          fieldKey,
+          parentCollection,
+          tokens,
+          fieldsStore,
+          relationsStore
+        );
+        return expanded.length > 0 ? expanded : [fieldKey];
       }
 
       // Heuristic branch (Issue #48): when no override exists, the field is
@@ -295,16 +291,15 @@ export function adjustFieldsForDisplays(
         if (heuristicTemplate) {
           const heuristicTokens = parseTemplateTokens(heuristicTemplate);
           if (heuristicTokens.length > 0) {
-            const isM2M = fieldDefForHeuristic.meta?.special?.includes('m2m');
-            if (isM2M) {
-              const relations = relationsStore?.getRelationsForField(parentCollection, fieldKey);
-              const junctionField = relations?.[0]?.meta?.junction_field;
-              if (junctionField) {
-                return heuristicTokens.map((tok) => `${fieldKey}.${junctionField}.${tok}`);
-              }
-              return [`${fieldKey}.${heuristicTokens[0]}`];
-            }
-            return heuristicTokens.map((tok) => `${fieldKey}.${tok}`);
+            const expanded = expandTokensThroughRelation(
+              fieldDefForHeuristic,
+              fieldKey,
+              parentCollection,
+              heuristicTokens,
+              fieldsStore,
+              relationsStore
+            );
+            return expanded.length > 0 ? expanded : [fieldKey];
           }
         }
       }
