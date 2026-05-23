@@ -85,3 +85,64 @@ describe('adjustFieldsForDisplays — override path', () => {
     expect(result).toEqual(expect.arrayContaining(['author.first_name', 'author.last_name']));
   });
 });
+
+describe('adjustFieldsForDisplays — M2M related-values display (issue #55)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('expands a related-values template through the junction_field for M2M (no name on pivot)', async () => {
+    // Setup mirrors a real M2M: Products → Products_Tags (junction, no `name` field) → Tags (`name` exists)
+    vi.doMock('@directus/extensions-sdk', () => ({
+      useStores: () => ({
+        useFieldsStore: () => ({
+          getField: (col: string, f: string) => {
+            if (col === 'products' && f === 'product_tags') {
+              return {
+                field: 'product_tags',
+                collection: 'products',
+                meta: {
+                  special: ['m2m'],
+                  display: 'related-values',
+                  display_options: { template: '{{name}}' },
+                },
+              };
+            }
+            if (col === 'tags' && f === 'name') return { field: 'name' };
+            // CRITICAL: junction has no `name` field
+            if (col === 'products_tags' && f === 'name') return null;
+            if (col === 'products_tags' && f === 'id') return { field: 'id' };
+            if (col === 'products_tags' && f === 'tag_id')
+              return { field: 'tag_id', schema: { foreign_key_table: 'tags' } };
+            if (col === 'tags' && f === 'id') return { field: 'id' };
+            return null;
+          },
+          getFieldsForCollection: () => [],
+        }),
+        useRelationsStore: () => ({
+          getRelationsForField: (col: string, f: string) =>
+            col === 'products' && f === 'product_tags'
+              ? [
+                  {
+                    collection: 'products_tags',
+                    field: 'product_id',
+                    related_collection: 'products',
+                    meta: { junction_field: 'tag_id' },
+                  },
+                ]
+              : [],
+        }),
+      }),
+      useCollection: () => ({ primaryKeyField: { value: { field: 'id' } } }),
+      useExtensions: () => ({ displays: { value: [] } }),
+    }));
+    const { adjustFieldsForDisplays } = await import('@/utils/adjustFieldsForDisplays');
+    const result = adjustFieldsForDisplays(['product_tags'], 'products');
+
+    // MUST traverse the junction: product_tags.tag_id.name, NEVER product_tags.name
+    expect(result).not.toContain('product_tags.name');
+    expect(
+      result.some((f) => f === 'product_tags.tag_id.name' || f === 'product_tags.tag_id.id')
+    ).toBe(true);
+  });
+});
