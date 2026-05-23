@@ -296,17 +296,11 @@ const displayValue = computed(() => {
   if (template) {
     const relationalValue = props.item[props.fieldKey];
 
-    // M2M unwrap: when the value is the junction array, dereference each item
-    // through `junction_field` so the template sees the target row directly.
-    // Issue #55: this must run regardless of how the template was sourced
-    // (override / field-settings / heuristic). The non-edit-mode cell does NOT
-    // delegate to render-display — it runs renderTemplate() directly on
-    // valueForTemplate, so without unwrapping junction items, `{{name}}` would
-    // look up `name` on the pivot row (which has no `name` field) and leak as
-    // a literal.
     void isOverridePath;
     void isHeuristicPath;
     let valueForTemplate = relationalValue;
+    // M2M: unwrap junction items through junction_field so the template
+    // resolves against the target row, not the pivot row.
     const needsM2MUnwrap =
       Array.isArray(relationalValue) && props.field?.meta?.special?.includes('m2m');
     if (needsM2MUnwrap) {
@@ -323,7 +317,6 @@ const displayValue = computed(() => {
       }
     }
 
-    // If we have an array (M2M / O2M), render each item with the template and join
     if (Array.isArray(valueForTemplate)) {
       if (valueForTemplate.length === 0) return '—';
       return valueForTemplate
@@ -334,21 +327,14 @@ const displayValue = computed(() => {
         .join(', ');
     }
 
-    // Single object → render once
     if (valueForTemplate && typeof valueForTemplate === 'object') {
       return renderTemplate(valueForTemplate, template);
     }
 
-    // Primitive value with override template (issue #55): a column-display
-    // override can be set on a simple, non-relational field — the override
-    // template (e.g. `{{name}}`) is then applied to the field's primitive
-    // value. Without this branch the cell renders em-dash even though the
-    // underlying value is present.
     if (valueForTemplate !== undefined && valueForTemplate !== null) {
       return renderTemplate(valueForTemplate, template);
     }
 
-    // If corrupted (null/undefined), try cache fallback
     const cachedValue = relationalCache.value[props.fieldKey];
     if (cachedValue) {
       return renderTemplate(cachedValue, template);

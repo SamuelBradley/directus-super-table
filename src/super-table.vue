@@ -346,11 +346,7 @@ const layoutQuery = useSync(props, 'layoutQuery', emit);
 
 // Collection info
 const { collection, filter, search, readonly } = toRefs(props);
-// Pass the reactive Ref (not collection.value) so useCollection re-reads
-// fields when the collection prop changes — critical for M2M relation editors
-// that swap the layout between collections. See issue #55.
-// @ts-expect-error — peer-dep Vue version skew between SDK and host produces
-// a spurious `RefSymbol` mismatch; the runtime contract is correct.
+// @ts-expect-error — Vue peer-dep skew between SDK and host: RefSymbol mismatch
 const { primaryKeyField, fields: fieldsInCollection, sortField } = useCollection(collection);
 
 // Helper to get primary key field name with proper typing

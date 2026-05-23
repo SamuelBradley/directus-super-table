@@ -123,24 +123,9 @@ function getDisplayFieldsForRelation(
   return [`${fieldKey}.${pkField}`];
 }
 
-/**
- * Issue #55: Single source of truth for expanding template tokens into API
- * field paths. Handles three relation classes:
- *
- *   M2M           → fieldKey.<junction_field>.<token>   (e.g. product_tags.tag_id.name)
- *   M2O / O2M     → fieldKey.<token>                     (e.g. author.first_name)
- *   translations  → fieldKey.<token>                     (deep parameter handles depth)
- *
- * Tokens that do not resolve to a real field on the actual *target* collection
- * are dropped, so we never enqueue `${junction}.name` for a junction without
- * a `name` column. Translations skip validation because schemas vary and the
- * existing client-side render path resolves missing fields gracefully.
- *
- * For dotted tokens (e.g. "category.name") only the first segment is validated;
- * the rest is forwarded verbatim. If the user's M2M template already starts
- * with the junction_field (e.g. {{tag_id.name}}), the junction prefix is NOT
- * duplicated.
- */
+// Expands template tokens to API field paths. For M2M, traverses
+// junction_field to reach the target collection; drops tokens that don't
+// exist on the target. Translations skip validation (varying schemas).
 export function expandTokensThroughRelation(
   field: { meta?: { special?: string[] } } | null,
   fieldKey: string,
@@ -317,10 +302,6 @@ export function adjustFieldsForDisplays(
         // Handle different display types with their specific field requirements
         switch (displayId) {
           case 'related-values': {
-            // Issue #55: M2M fields must traverse junction_field, not query the junction
-            // collection directly. We delegate token expansion to expandTokensThroughRelation
-            // which knows about M2M junctions, validates token existence on the actual
-            // target collection, and drops tokens that would 403.
             const template = field.meta?.display_options?.template;
             if (template) {
               const templateTokens = extractFieldsFromTemplate(template);
@@ -333,9 +314,7 @@ export function adjustFieldsForDisplays(
                 relationsStore
               );
 
-              // Always include the PK of the actual target so the row can be keyed.
-              // For M2M, the PK lives behind the junction_field path; for M2O/O2M, it's
-              // a direct child of fieldKey.
+              // PK path so the row can be keyed; M2M needs the junction prefix.
               const isM2M = field.meta?.special?.includes('m2m') === true;
               let pkPath: string | null = null;
               if (isM2M) {
@@ -368,12 +347,8 @@ export function adjustFieldsForDisplays(
 
               displayFields =
                 pkPath && !expanded.includes(pkPath) ? [...expanded, pkPath] : expanded;
-              // Final safety: if nothing valid, fall back to the bare fieldKey so the
-              // request still loads the relation and the row renders.
               if (displayFields.length === 0) displayFields = [fieldKey];
             } else {
-              // No template: just request the PK of the related collection so the row
-              // can be keyed. For M2M, traverse junction_field; for others, direct path.
               const rootField = (fieldKey.split('.')[0] ?? fieldKey) as string;
               const relatedCollection = getRelatedCollection(
                 parentCollection,
