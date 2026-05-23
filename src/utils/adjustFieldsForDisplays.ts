@@ -124,6 +124,88 @@ function getDisplayFieldsForRelation(
 }
 
 /**
+ * Issue #55: Single source of truth for expanding template tokens into API
+ * field paths. Handles three relation classes:
+ *
+ *   M2M           → fieldKey.<junction_field>.<token>   (e.g. product_tags.tag_id.name)
+ *   M2O / O2M     → fieldKey.<token>                     (e.g. author.first_name)
+ *   translations  → fieldKey.<token>                     (deep parameter handles depth)
+ *
+ * Tokens that do not resolve to a real field on the actual *target* collection
+ * are dropped, so we never enqueue `${junction}.name` for a junction without
+ * a `name` column. Translations skip validation because schemas vary and the
+ * existing client-side render path resolves missing fields gracefully.
+ *
+ * For dotted tokens (e.g. "category.name") only the first segment is validated;
+ * the rest is forwarded verbatim. If the user's M2M template already starts
+ * with the junction_field (e.g. {{tag_id.name}}), the junction prefix is NOT
+ * duplicated.
+ */
+export function expandTokensThroughRelation(
+  field: { meta?: { special?: string[] } } | null,
+  fieldKey: string,
+  parentCollection: string,
+  tokens: string[],
+  fieldsStore: { getField: (collection: string, fieldName: string) => any },
+  relationsStore: { getRelationsForField: (collection: string, fieldName: string) => any[] }
+): string[] {
+  if (!tokens.length) return [];
+  const isM2M = field?.meta?.special?.includes('m2m') === true;
+  const isTranslations = field?.meta?.special?.includes('translations') === true;
+
+  if (isTranslations) {
+    return tokens.map((tok) => `${fieldKey}.${tok}`);
+  }
+
+  if (isM2M) {
+    const relations = relationsStore.getRelationsForField(parentCollection, fieldKey);
+    const rel = relations?.[0];
+    const junctionField = rel?.meta?.junction_field as string | undefined;
+    const junctionCollection = rel?.collection as string | undefined;
+    if (!junctionField || !junctionCollection) {
+      return [];
+    }
+    const junctionFieldDef = fieldsStore.getField(junctionCollection, junctionField);
+    const targetCollection = junctionFieldDef?.schema?.foreign_key_table as
+      | string
+      | undefined;
+    if (!targetCollection) return [];
+
+    const expanded: string[] = [];
+    for (const tok of tokens) {
+      const parts = tok.split('.');
+      // If user wrote the junction_field as the first segment already, strip it
+      // so we don't double-prefix.
+      const tokWithoutJunctionPrefix =
+        parts[0] === junctionField ? parts.slice(1).join('.') : tok;
+      if (!tokWithoutJunctionPrefix) continue;
+      const firstSegment = tokWithoutJunctionPrefix.split('.')[0]!;
+      if (!fieldsStore.getField(targetCollection, firstSegment)) continue;
+      expanded.push(`${fieldKey}.${junctionField}.${tokWithoutJunctionPrefix}`);
+    }
+    return expanded;
+  }
+
+  // M2O / O2M / files: direct paths, validated against related_collection.
+  const relations = relationsStore.getRelationsForField(parentCollection, fieldKey);
+  const rel = relations?.[0];
+  const target =
+    (rel?.related_collection as string | undefined) ?? (rel?.collection as string | undefined);
+  if (!target) {
+    // Best-effort: return as-is when we have no target info to validate against.
+    return tokens.map((tok) => `${fieldKey}.${tok}`);
+  }
+
+  const expanded: string[] = [];
+  for (const tok of tokens) {
+    const firstSegment = tok.includes('.') ? (tok.split('.')[0] as string) : tok;
+    if (!fieldsStore.getField(target, firstSegment)) continue;
+    expanded.push(`${fieldKey}.${tok}`);
+  }
+  return expanded;
+}
+
+/**
  * Adjusts fields based on their display configuration, following the original Directus pattern.
  * This function replicates the core logic from Directus core for proper display field resolution.
  * Enhanced with field existence validation to prevent requesting non-existent fields.
