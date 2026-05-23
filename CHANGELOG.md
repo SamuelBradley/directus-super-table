@@ -5,6 +5,28 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.4.1 — Hotfix: M2M pivot 403 + collection-switch (Issue #55)
+
+### Fixed
+- **M2M pivot 403:** `related-values` display no longer queries
+  `${field}.name` on the junction collection. Field paths now traverse
+  `junction_field` to the actual target and drop tokens missing there.
+- **Collection-switch stale fields:** `useCollection` now receives a
+  reactive `Ref`, so the field list refreshes when the collection prop
+  changes. Reported by @draxx318 in #55.
+- **M2M display rendering:** Junction-row unwrap also runs for
+  field-settings displays (was previously override/heuristic only),
+  fixing literal `{{name}}` leaks.
+- **Override on primitive fields:** A column-display template on a
+  non-relational field now applies to the value instead of returning
+  em-dash.
+
+### Refactor
+- New `expandTokensThroughRelation` helper unifies M2M-junction
+  traversal across the override, heuristic, and `related-values`
+  branches of `adjustFieldsForDisplays`. Closes the drift class behind
+  #34 and #55.
+
 ## v0.4.0 — Permission-aware layout (Issue #37)
 
 ### Fixed
