@@ -166,9 +166,7 @@ export function expandTokensThroughRelation(
       return [];
     }
     const junctionFieldDef = fieldsStore.getField(junctionCollection, junctionField);
-    const targetCollection = junctionFieldDef?.schema?.foreign_key_table as
-      | string
-      | undefined;
+    const targetCollection = junctionFieldDef?.schema?.foreign_key_table as string | undefined;
     if (!targetCollection) return [];
 
     const expanded: string[] = [];
@@ -176,8 +174,7 @@ export function expandTokensThroughRelation(
       const parts = tok.split('.');
       // If user wrote the junction_field as the first segment already, strip it
       // so we don't double-prefix.
-      const tokWithoutJunctionPrefix =
-        parts[0] === junctionField ? parts.slice(1).join('.') : tok;
+      const tokWithoutJunctionPrefix = parts[0] === junctionField ? parts.slice(1).join('.') : tok;
       if (!tokWithoutJunctionPrefix) continue;
       const firstSegment = tokWithoutJunctionPrefix.split('.')[0]!;
       if (!fieldsStore.getField(targetCollection, firstSegment)) continue;
@@ -369,7 +366,8 @@ export function adjustFieldsForDisplays(
                 }
               }
 
-              displayFields = pkPath && !expanded.includes(pkPath) ? [...expanded, pkPath] : expanded;
+              displayFields =
+                pkPath && !expanded.includes(pkPath) ? [...expanded, pkPath] : expanded;
               // Final safety: if nothing valid, fall back to the bare fieldKey so the
               // request still loads the relation and the row renders.
               if (displayFields.length === 0) displayFields = [fieldKey];
