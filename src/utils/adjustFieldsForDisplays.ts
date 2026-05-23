@@ -325,19 +325,66 @@ export function adjustFieldsForDisplays(
         // Handle different display types with their specific field requirements
         switch (displayId) {
           case 'related-values': {
-            // For related-values, we need fields for the template
+            // Issue #55: M2M fields must traverse junction_field, not query the junction
+            // collection directly. We delegate token expansion to expandTokensThroughRelation
+            // which knows about M2M junctions, validates token existence on the actual
+            // target collection, and drops tokens that would 403.
             const template = field.meta?.display_options?.template;
             if (template) {
-              // Parse template to extract field requirements
-              const templateFields = extractFieldsFromTemplate(template);
-              displayFields = templateFields.map((f) => `${fieldKey}.${f}`);
+              const templateTokens = extractFieldsFromTemplate(template);
+              const expanded = expandTokensThroughRelation(
+                field,
+                fieldKey,
+                parentCollection,
+                templateTokens,
+                fieldsStore,
+                relationsStore
+              );
+
+              // Always include the PK of the actual target so the row can be keyed.
+              // For M2M, the PK lives behind the junction_field path; for M2O/O2M, it's
+              // a direct child of fieldKey.
+              const isM2M = field.meta?.special?.includes('m2m') === true;
+              let pkPath: string | null = null;
+              if (isM2M) {
+                const relations = relationsStore.getRelationsForField(parentCollection, fieldKey);
+                const rel = relations?.[0];
+                const junctionField = rel?.meta?.junction_field as string | undefined;
+                const junctionCollection = rel?.collection as string | undefined;
+                if (junctionField && junctionCollection) {
+                  const junctionFieldDef = fieldsStore.getField(junctionCollection, junctionField);
+                  const targetCollection = junctionFieldDef?.schema?.foreign_key_table as
+                    | string
+                    | undefined;
+                  if (targetCollection) {
+                    const targetPk = getPrimaryKeyForCollection(targetCollection);
+                    pkPath = `${fieldKey}.${junctionField}.${targetPk}`;
+                  }
+                }
+              } else {
+                const rootField = (fieldKey.split('.')[0] ?? fieldKey) as string;
+                const relatedCollection = getRelatedCollection(
+                  parentCollection,
+                  rootField,
+                  relationsStore
+                );
+                if (relatedCollection) {
+                  const targetPk = getPrimaryKeyForCollection(relatedCollection);
+                  pkPath = `${fieldKey}.${targetPk}`;
+                }
+              }
+
+              displayFields = pkPath && !expanded.includes(pkPath) ? [...expanded, pkPath] : expanded;
+              // Final safety: if nothing valid, fall back to the bare fieldKey so the
+              // request still loads the relation and the row renders.
+              if (displayFields.length === 0) displayFields = [fieldKey];
             } else {
-              // Default fields for related-values without template
-              // Get the primary key of the related collection
-              const fieldName = fieldKey.split('.')[0];
+              // No template: just request the PK of the related collection so the row
+              // can be keyed. For M2M, traverse junction_field; for others, direct path.
+              const rootField = (fieldKey.split('.')[0] ?? fieldKey) as string;
               const relatedCollection = getRelatedCollection(
                 parentCollection,
-                fieldName,
+                rootField,
                 relationsStore
               );
               const pkField = getPrimaryKeyForCollection(relatedCollection);
