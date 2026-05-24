@@ -293,17 +293,16 @@ const displayValue = computed(() => {
       isHeuristicPath = true;
     }
   }
-
   if (template) {
     const relationalValue = props.item[props.fieldKey];
 
-    // M2M unwrap when override OR heuristic provides the template. (Field-display
-    // renders via the existing path which handles its own shape.)
+    void isOverridePath;
+    void isHeuristicPath;
     let valueForTemplate = relationalValue;
+    // M2M: unwrap junction items through junction_field so the template
+    // resolves against the target row, not the pivot row.
     const needsM2MUnwrap =
-      (isOverridePath || isHeuristicPath) &&
-      Array.isArray(relationalValue) &&
-      props.field?.meta?.special?.includes('m2m');
+      Array.isArray(relationalValue) && props.field?.meta?.special?.includes('m2m');
     if (needsM2MUnwrap) {
       const collection = props.field?.collection;
       const fieldName = props.field?.field;
@@ -318,7 +317,6 @@ const displayValue = computed(() => {
       }
     }
 
-    // If we have an array (M2M / O2M), render each item with the template and join
     if (Array.isArray(valueForTemplate)) {
       if (valueForTemplate.length === 0) return '—';
       return valueForTemplate
@@ -329,12 +327,14 @@ const displayValue = computed(() => {
         .join(', ');
     }
 
-    // Single object → render once
     if (valueForTemplate && typeof valueForTemplate === 'object') {
       return renderTemplate(valueForTemplate, template);
     }
 
-    // If corrupted (primitive value), try cache fallback
+    if (valueForTemplate !== undefined && valueForTemplate !== null) {
+      return renderTemplate(valueForTemplate, template);
+    }
+
     const cachedValue = relationalCache.value[props.fieldKey];
     if (cachedValue) {
       return renderTemplate(cachedValue, template);

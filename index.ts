@@ -1,5 +1,5 @@
 import { computed } from 'vue';
-import { defineLayout, useCollection, useStores } from '@directus/extensions-sdk';
+import { defineLayout, useStores } from '@directus/extensions-sdk';
 import { formatTitle } from '@directus/format-title';
 import LayoutComponent from './src/super-table.vue';
 import ActionsComponent from './src/actions.vue';
@@ -21,7 +21,6 @@ const layoutConfig = {
   setup(props: any, { emit }: any) {
     const { useFieldsStore } = useStores();
     const fieldsStore = useFieldsStore();
-    useCollection(props.collection); // parity with super-table.vue
 
     // Issue #48: Expose a flat list of currently visible columns to slot
     // components (options sidebar). Each entry uses the *root* field key as id

@@ -346,7 +346,8 @@ const layoutQuery = useSync(props, 'layoutQuery', emit);
 
 // Collection info
 const { collection, filter, search, readonly } = toRefs(props);
-const { primaryKeyField, fields: fieldsInCollection, sortField } = useCollection(collection.value);
+// @ts-expect-error — Vue peer-dep skew between SDK and host: RefSymbol mismatch
+const { primaryKeyField, fields: fieldsInCollection, sortField } = useCollection(collection);
 
 // Helper to get primary key field name with proper typing
 const getPrimaryKeyFieldName = () => {

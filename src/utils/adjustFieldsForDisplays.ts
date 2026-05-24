@@ -123,6 +123,70 @@ function getDisplayFieldsForRelation(
   return [`${fieldKey}.${pkField}`];
 }
 
+// Expands template tokens to API field paths. For M2M, traverses
+// junction_field to reach the target collection; drops tokens that don't
+// exist on the target. Translations skip validation (varying schemas).
+export function expandTokensThroughRelation(
+  field: { meta?: { special?: string[] } } | null,
+  fieldKey: string,
+  parentCollection: string,
+  tokens: string[],
+  fieldsStore: { getField: (collection: string, fieldName: string) => any },
+  relationsStore: { getRelationsForField: (collection: string, fieldName: string) => any[] }
+): string[] {
+  if (!tokens.length) return [];
+  const isM2M = field?.meta?.special?.includes('m2m') === true;
+  const isTranslations = field?.meta?.special?.includes('translations') === true;
+
+  if (isTranslations) {
+    return tokens.map((tok) => `${fieldKey}.${tok}`);
+  }
+
+  if (isM2M) {
+    const relations = relationsStore.getRelationsForField(parentCollection, fieldKey);
+    const rel = relations?.[0];
+    const junctionField = rel?.meta?.junction_field as string | undefined;
+    const junctionCollection = rel?.collection as string | undefined;
+    if (!junctionField || !junctionCollection) {
+      return [];
+    }
+    const junctionFieldDef = fieldsStore.getField(junctionCollection, junctionField);
+    const targetCollection = junctionFieldDef?.schema?.foreign_key_table as string | undefined;
+    if (!targetCollection) return [];
+
+    const expanded: string[] = [];
+    for (const tok of tokens) {
+      const parts = tok.split('.');
+      // If user wrote the junction_field as the first segment already, strip it
+      // so we don't double-prefix.
+      const tokWithoutJunctionPrefix = parts[0] === junctionField ? parts.slice(1).join('.') : tok;
+      if (!tokWithoutJunctionPrefix) continue;
+      const firstSegment = tokWithoutJunctionPrefix.split('.')[0]!;
+      if (!fieldsStore.getField(targetCollection, firstSegment)) continue;
+      expanded.push(`${fieldKey}.${junctionField}.${tokWithoutJunctionPrefix}`);
+    }
+    return expanded;
+  }
+
+  // M2O / O2M / files: direct paths, validated against related_collection.
+  const relations = relationsStore.getRelationsForField(parentCollection, fieldKey);
+  const rel = relations?.[0];
+  const target =
+    (rel?.related_collection as string | undefined) ?? (rel?.collection as string | undefined);
+  if (!target) {
+    // Best-effort: return as-is when we have no target info to validate against.
+    return tokens.map((tok) => `${fieldKey}.${tok}`);
+  }
+
+  const expanded: string[] = [];
+  for (const tok of tokens) {
+    const firstSegment = tok.includes('.') ? (tok.split('.')[0] as string) : tok;
+    if (!fieldsStore.getField(target, firstSegment)) continue;
+    expanded.push(`${fieldKey}.${tok}`);
+  }
+  return expanded;
+}
+
 /**
  * Adjusts fields based on their display configuration, following the original Directus pattern.
  * This function replicates the core logic from Directus core for proper display field resolution.
@@ -182,19 +246,15 @@ export function adjustFieldsForDisplays(
           return fieldKey;
         }
 
-        // M2M: paths must traverse the junction's junction_field.
-        const isM2M = fieldDef?.meta?.special?.includes('m2m');
-        if (isM2M) {
-          const relations = relationsStore?.getRelationsForField(parentCollection, fieldKey);
-          const junctionField = relations?.[0]?.meta?.junction_field;
-          if (junctionField) {
-            return tokens.map((tok) => `${fieldKey}.${junctionField}.${tok}`);
-          }
-          return [`${fieldKey}.${tokens[0]}`]; // best-effort fallback
-        }
-
-        // M2O / O2M / files: direct dotted paths
-        return tokens.map((tok) => `${fieldKey}.${tok}`);
+        const expanded = expandTokensThroughRelation(
+          fieldDef,
+          fieldKey,
+          parentCollection,
+          tokens,
+          fieldsStore,
+          relationsStore
+        );
+        return expanded.length > 0 ? expanded : [fieldKey];
       }
 
       // Heuristic branch (Issue #48): when no override exists, the field is
@@ -213,16 +273,15 @@ export function adjustFieldsForDisplays(
         if (heuristicTemplate) {
           const heuristicTokens = parseTemplateTokens(heuristicTemplate);
           if (heuristicTokens.length > 0) {
-            const isM2M = fieldDefForHeuristic.meta?.special?.includes('m2m');
-            if (isM2M) {
-              const relations = relationsStore?.getRelationsForField(parentCollection, fieldKey);
-              const junctionField = relations?.[0]?.meta?.junction_field;
-              if (junctionField) {
-                return heuristicTokens.map((tok) => `${fieldKey}.${junctionField}.${tok}`);
-              }
-              return [`${fieldKey}.${heuristicTokens[0]}`];
-            }
-            return heuristicTokens.map((tok) => `${fieldKey}.${tok}`);
+            const expanded = expandTokensThroughRelation(
+              fieldDefForHeuristic,
+              fieldKey,
+              parentCollection,
+              heuristicTokens,
+              fieldsStore,
+              relationsStore
+            );
+            return expanded.length > 0 ? expanded : [fieldKey];
           }
         }
       }
@@ -243,19 +302,57 @@ export function adjustFieldsForDisplays(
         // Handle different display types with their specific field requirements
         switch (displayId) {
           case 'related-values': {
-            // For related-values, we need fields for the template
             const template = field.meta?.display_options?.template;
             if (template) {
-              // Parse template to extract field requirements
-              const templateFields = extractFieldsFromTemplate(template);
-              displayFields = templateFields.map((f) => `${fieldKey}.${f}`);
+              const templateTokens = extractFieldsFromTemplate(template);
+              const expanded = expandTokensThroughRelation(
+                field,
+                fieldKey,
+                parentCollection,
+                templateTokens,
+                fieldsStore,
+                relationsStore
+              );
+
+              // PK path so the row can be keyed; M2M needs the junction prefix.
+              const isM2M = field.meta?.special?.includes('m2m') === true;
+              let pkPath: string | null = null;
+              if (isM2M) {
+                const relations = relationsStore.getRelationsForField(parentCollection, fieldKey);
+                const rel = relations?.[0];
+                const junctionField = rel?.meta?.junction_field as string | undefined;
+                const junctionCollection = rel?.collection as string | undefined;
+                if (junctionField && junctionCollection) {
+                  const junctionFieldDef = fieldsStore.getField(junctionCollection, junctionField);
+                  const targetCollection = junctionFieldDef?.schema?.foreign_key_table as
+                    | string
+                    | undefined;
+                  if (targetCollection) {
+                    const targetPk = getPrimaryKeyForCollection(targetCollection);
+                    pkPath = `${fieldKey}.${junctionField}.${targetPk}`;
+                  }
+                }
+              } else {
+                const rootField = (fieldKey.split('.')[0] ?? fieldKey) as string;
+                const relatedCollection = getRelatedCollection(
+                  parentCollection,
+                  rootField,
+                  relationsStore
+                );
+                if (relatedCollection) {
+                  const targetPk = getPrimaryKeyForCollection(relatedCollection);
+                  pkPath = `${fieldKey}.${targetPk}`;
+                }
+              }
+
+              displayFields =
+                pkPath && !expanded.includes(pkPath) ? [...expanded, pkPath] : expanded;
+              if (displayFields.length === 0) displayFields = [fieldKey];
             } else {
-              // Default fields for related-values without template
-              // Get the primary key of the related collection
-              const fieldName = fieldKey.split('.')[0];
+              const rootField = (fieldKey.split('.')[0] ?? fieldKey) as string;
               const relatedCollection = getRelatedCollection(
                 parentCollection,
-                fieldName,
+                rootField,
                 relationsStore
               );
               const pkField = getPrimaryKeyForCollection(relatedCollection);

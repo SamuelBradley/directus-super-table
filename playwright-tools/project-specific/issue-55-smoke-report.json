@@ -1,0 +1,106 @@
+{
+  "generatedAt": "2026-05-23T09:26:58.281Z",
+  "baseUrl": "http://localhost:8058",
+  "overallStatus": "PASS",
+  "summary": {
+    "scenario1Errors": 0,
+    "scenario2Errors": 0,
+    "scenario2Leaks": 0,
+    "totalItemsRequests": 34
+  },
+  "scenario1": [
+    {
+      "collection": "pages",
+      "tableRendered": true,
+      "navError": null,
+      "errors": [],
+      "screenshot": "/private/var/www/directus/extensions/super-layout-table/screenshots/issue-55/scenario1-pages.png"
+    },
+    {
+      "collection": "content_block",
+      "tableRendered": true,
+      "navError": null,
+      "errors": [],
+      "screenshot": "/private/var/www/directus/extensions/super-layout-table/screenshots/issue-55/scenario1-content_block.png"
+    },
+    {
+      "collection": "content_headline",
+      "tableRendered": true,
+      "navError": null,
+      "errors": [],
+      "screenshot": "/private/var/www/directus/extensions/super-layout-table/screenshots/issue-55/scenario1-content_headline.png"
+    },
+    {
+      "collection": "content_image",
+      "tableRendered": true,
+      "navError": null,
+      "errors": [],
+      "screenshot": "/private/var/www/directus/extensions/super-layout-table/screenshots/issue-55/scenario1-content_image.png"
+    },
+    {
+      "collection": "expandable",
+      "tableRendered": true,
+      "navError": null,
+      "errors": [],
+      "screenshot": "/private/var/www/directus/extensions/super-layout-table/screenshots/issue-55/scenario1-expandable.png"
+    }
+  ],
+  "scenario2": [
+    {
+      "from": "pages",
+      "to": "content_headline",
+      "tableRendered": true,
+      "navError": null,
+      "firstItemsRequest": {
+        "time": "2026-05-23T09:26:51.525Z",
+        "url": "http://localhost:8058/items/content_headline?aggregate[count]=*&filter[status][_neq]=archived",
+        "status": 200,
+        "collection": "content_headline",
+        "fields": []
+      },
+      "leakedFields": [],
+      "errors": [],
+      "screenshot": "/private/var/www/directus/extensions/super-layout-table/screenshots/issue-55/scenario2-pages-to-content_headline.png"
+    },
+    {
+      "from": "content_headline",
+      "to": "content_block",
+      "tableRendered": true,
+      "navError": null,
+      "firstItemsRequest": {
+        "time": "2026-05-23T09:26:54.046Z",
+        "url": "http://localhost:8058/items/content_block?aggregate[countDistinct]=id&filter[status][_neq]=archived",
+        "status": 200,
+        "collection": "content_block",
+        "fields": []
+      },
+      "leakedFields": [],
+      "errors": [],
+      "screenshot": "/private/var/www/directus/extensions/super-layout-table/screenshots/issue-55/scenario2-content_headline-to-content_block.png"
+    },
+    {
+      "from": "content_block",
+      "to": "pages",
+      "tableRendered": true,
+      "navError": null,
+      "firstItemsRequest": {
+        "time": "2026-05-23T09:26:56.446Z",
+        "url": "http://localhost:8058/items/pages?fields[]=id&fields[]=slug&fields[]=status&fields[]=subtitle&fields[]=template&fields[]=title&page=1&limit=25&filter[status][_neq]=archived",
+        "status": 200,
+        "collection": "pages",
+        "fields": [
+          "id",
+          "slug",
+          "status",
+          "subtitle",
+          "template",
+          "title"
+        ]
+      },
+      "leakedFields": [],
+      "errors": [],
+      "screenshot": "/private/var/www/directus/extensions/super-layout-table/screenshots/issue-55/scenario2-content_block-to-pages.png"
+    }
+  ],
+  "allItemsErrors": []
+}
