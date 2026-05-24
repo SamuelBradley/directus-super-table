@@ -5,6 +5,14 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.4.2 — Marketplace metadata
+
+### Changed
+- Added `icon: 'table_rows'` to package.json for better Marketplace
+  presentation.
+- Removed the hard-coded version line from README — version history is
+  tracked in CHANGELOG, the README copy was always lagging.
+
 ## v0.4.1 — Hotfix: M2M pivot 403 + collection-switch (Issue #55)
 
 ### Fixed

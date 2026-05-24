@@ -11,9 +11,7 @@ A powerful and feature-rich table layout extension for Directus 11+ that enhance
 
 ![Super Table Demo](https://raw.githubusercontent.com/smartlabsAT/directus-super-table/main/demo/super-table-demo.gif)
 
-## Version
-
-v0.3.1 - Stable release
+See [CHANGELOG.md](./CHANGELOG.md) for version history.
 
 ## 🌟 Top Features
 
