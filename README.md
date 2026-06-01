@@ -31,26 +31,28 @@ Powerful search functionality across all table fields, including nested relation
 Switch seamlessly between read-only view mode and interactive edit mode. Control when and how users can modify data.
 
 ### 🖼️ Advanced Image Display & Selection
-Smart image handling with hover preview, proper aspect ratios, and built-in file browser for selecting media files directly from table cells.
+Smart image handling with an enlarged hover preview, proper aspect ratios, and a built-in file browser for selecting media files directly from table cells.
 
 ### 🔄 Deep Duplication
 Duplicate items with all their relationships and translations. Perfect for creating variations of complex data structures.
+
+### 🧩 Many-to-Any (M2A) Display
+Render polymorphic Many-to-Any relationships directly in the table. Use the `related-values` display or a per-column template with the `{{item:collection.field}}` syntax — including nested chains like `{{item:partners_catalog.catalog_id.title}}`. Each junction row resolves against its own target collection.
 
 
 
 ### Display Features
 - **Custom Cell Rendering** - Specialized display for different field types
 - **Relationship Support** - Handle M2O, O2M, M2M, M2A relationships with deep data access
-- **Image Preview** - Inline image display with lightbox support and file browser
+- **Image Preview** - Inline image display with an enlarged hover preview and file browser
 - **Tag Support** - Automatic detection and display of tag fields as visual chips with inline popover editor for adding/removing tags
 - **Status Indicators** - Visual representation of boolean and select fields
 - **Translation Support** - Display multiple language translations as separate columns
 - **Column Alignment** - Configurable text alignment per column (left, center, right)
 
 ### Performance
-- **Optimized Loading** - Default 1000 rows with efficient pagination
-- **Smart Caching** - Intelligent data caching for better performance
-- **Lazy Loading** - Load data as needed for large datasets
+- **Native Pagination** - Server-side pagination with selectable page sizes (25, 50, 100, 250, 500, 1000; default 25)
+- **Separate Count Query** - Item count is fetched independently so the table still renders when the count query is restricted by permissions
 
 
 ## Installation
@@ -87,12 +89,12 @@ npx directus start
 1. Clone or download the extension to your Directus extensions folder:
    ```bash
    cd /path/to/directus/extensions
-   git clone https://github.com/yourusername/super-layout-table.git
+   git clone https://github.com/smartlabsAT/directus-super-table.git
    ```
 
 2. Install dependencies:
    ```bash
-   cd super-layout-table
+   cd directus-super-table
    pnpm install  # or npm install
    ```
 
@@ -105,11 +107,10 @@ npx directus start
 
 ### Configuration
 
-1. Navigate to your collection settings in Directus Admin Panel
-2. Click on "Layout Options" in the collection settings
-3. Select "Super Layout Table" from the layout dropdown
-4. Configure the layout options according to your needs
-5. Save your changes
+1. Open a collection in the Directus Content module
+2. Open the layout dropdown in the sidebar
+3. Select **"Super Table"** as the layout
+4. Configure the layout options in the **Layout Options** sidebar panel
 
 ## Usage Guide
 
@@ -127,20 +128,23 @@ Quick Filters provide fast access to frequently used filter combinations:
 ### Inline Editing
 Edit data directly in the table without opening a separate form:
 
-1. **Entering Edit Mode**: Click on any editable cell
+1. **Entering Edit Mode**: Enable "Edit Mode" in the **Layout Options** sidebar (or the edit toggle in the table header), then click an editable cell
 2. **Editor Types**:
    - Text fields: Simple input or WYSIWYG editor
    - Boolean: Checkbox toggle
    - Select: Dropdown menu
    - Date/Time: Full date picker with calendar
    - Color: Color picker with alignment support
-   - Image/File: Enhanced file browser with larger previews (✨ IMPROVED in v0.2.6)
-3. **Unified Header Actions** (✨ NEW in v0.2.3):
-   - Save/Cancel buttons now in popover header for all field types
+   - Image/File: File browser with larger previews
+3. **Unified Header Actions**:
+   - Save/Cancel buttons in the popover header for all field types
    - Consistent UI across all editors
    - Icon-only buttons matching native Directus style
 4. **Saving**: Click save button (✓) or press Enter
 5. **Canceling**: Click cancel button (✗) or press Escape
+
+> **Note:** Relational fields (M2O, O2M, M2M, M2A) are display-only and are not
+> editable inline — open the item detail view to edit them.
 
 ### Column Management
 Customize which columns are displayed and how:
@@ -150,6 +154,34 @@ Customize which columns are displayed and how:
 3. **Rename Columns**: Right-click header and select "Rename"
 4. **Reorder Columns**: Drag column headers to reorder
 5. **Resize Columns**: Drag column borders to resize
+
+### Column Displays
+Override how a column renders by attaching a display template, configured in the
+sidebar under **Layout Options → Column Displays**:
+
+1. **Add a display**: Click "Add Column Display", pick a column, and enter a template
+2. **Edit / Remove**: Click an existing entry to edit it, or the ✗ icon to remove it
+3. **Templates** use the `{{ field }}` mustache syntax and may reference related fields
+
+#### Many-to-Any (M2A) templates
+M2A fields are polymorphic — each row points at one of several target collections —
+so their templates use a dedicated `item:` syntax. Tokens are written **relative to
+the field** (do not prefix the field name):
+
+- `{{collection}}` — the name of the row's target collection
+- `{{item:<collection>.<field>}}` — a field on a specific target collection
+- Nested paths are supported, e.g. `{{item:partners_catalog.catalog_id.title}}`
+  (M2A → M2O → value)
+
+Each junction row only resolves the token whose `<collection>` matches its own
+target, so a template can cover every allowed collection at once:
+
+```
+{{collection}}: {{item:partners_catalog.name}} {{item:service.name}}
+```
+
+The editor shows the allowed collections and an example for the selected field. A
+bare token (e.g. `{{name}}`) is intentionally dropped for M2A — use the `item:` form.
 
 ### Bookmarks
 Save table configurations for quick access:
@@ -163,35 +195,38 @@ Save table configurations for quick access:
 
 ```
 super-layout-table/
+├── index.ts                          # Extension entry point (defineLayout)
 ├── src/
-│   ├── index.ts                    # Extension entry point
-│   ├── super-layout-table.vue      # Main component
-│   ├── actions.vue                 # Row/bulk actions component
-│   ├── types.ts                    # TypeScript definitions
-│   ├── constants.ts                # Constants and defaults
-│   └── components/
-│       ├── InlineEditPopover.vue   # Inline editor popover
-│       ├── QuickFilters.vue        # Quick filter management
-│       └── CellRenderers/          # Custom cell renderers
-│           ├── ImageCell.vue       # Image display
-│           ├── SelectCell.vue      # Select/status display
-│           └── BooleanCell.vue     # Boolean checkbox
-├── composables/
-│   ├── api.ts                      # API operations
-│   ├── useAliasFields.ts           # Field aliasing logic
-│   └── useLanguageSelector.ts     # Translation language selection
-├── utils/
-│   ├── adjustFieldsForDisplays.ts  # Display field adjustments
-│   └── getDefaultDisplayForType.ts # Default display mapping
-├── package.json                     # Package configuration
-├── tsconfig.json                   # TypeScript configuration
-└── README.md                       # This file
+│   ├── super-table.vue               # Main layout component
+│   ├── options.vue                   # Sidebar layout options
+│   ├── actions.vue                   # Row/bulk actions component
+│   ├── components/
+│   │   ├── InlineEditPopover.vue     # Inline editor popover
+│   │   ├── QuickFilters.vue          # Quick filter management
+│   │   ├── ColumnDisplaysSection.vue # Column-display list + editor
+│   │   ├── ColumnDisplayEditor.vue   # Single column-display form
+│   │   ├── EditableCellRelational.vue# Relational/M2A cell rendering
+│   │   └── CellRenderers/            # Custom cell renderers (image, select, …)
+│   ├── composables/
+│   │   ├── api.ts                    # API operations (useTableApi)
+│   │   ├── useAliasFields.ts         # Field aliasing logic
+│   │   ├── useColumnDisplays.ts      # Column-display override CRUD
+│   │   └── …                         # pagination, sort, permissions, translations
+│   └── utils/
+│       ├── adjustFieldsForDisplays.ts# Display field expansion (incl. M2A)
+│       ├── displayHeuristics.ts      # Template tokenising + relation helpers
+│       ├── resolveM2ARelation.ts     # M2A junction-shape resolver
+│       └── getDefaultDisplayForType.ts# Default display mapping
+├── tests/                            # Vitest unit tests
+├── package.json                      # Package configuration
+├── tsconfig.json                     # TypeScript configuration
+└── README.md                         # This file
 ```
 
 ## Development
 
 ### Prerequisites
-- Node.js 18+
+- Node.js 20+ (CI runs on 20.x and 22.x)
 - pnpm package manager
 - Directus 11.0.0+
 
@@ -238,10 +273,12 @@ Every push and pull request triggers automated quality validation:
 
 ```
 .github/workflows/
-├── quality-checks.yml  # Main quality validation (runs on push/PR)
-├── pr-checks.yml      # PR-specific checks with auto-comments
-├── release.yml        # Automated release creation on tags
-└── badges.yml         # Status badge updates
+├── ci.yml              # CI/CD pipeline (build, test, quality on Node 20.x & 22.x)
+├── quality-checks.yml  # Type-check, lint, format, build (push/PR)
+├── test.yml            # Vitest unit tests
+├── pr-checks.yml       # PR-specific checks with auto-comments
+├── release.yml         # Automated release creation on version tags
+└── badges.yml          # Status badge updates
 ```
 
 ### Running Locally
@@ -266,56 +303,45 @@ pnpm run build         # Build test
 5. GitHub Actions will automatically validate your code
 6. PR will receive an automated quality report comment
 
-### Extension Configuration
-The extension can be configured through the Directus interface with these options:
+### Layout Options
+The layout persists these options (those marked *(sidebar)* have a control in the
+**Layout Options** panel; the rest are set through table interactions):
 
 ```typescript
 {
-  // Number of items to load initially
-  defaultRowCount: 1000,
-  
-  // Row height: 'compact' | 'cozy' | 'comfortable'
-  rowHeight: 'comfortable',
-  
-  // Selection mode: 'none' | 'single' | 'multiple'
-  showSelect: 'multiple',
-  
-  // Enable fixed header
-  fixedHeader: true,
-  
-  // Allow column resizing
-  showResize: true,
-  
-  // Enable inline editing
-  allowInlineEdit: true,
-  
-  // Enable bookmark system
-  allowBookmarks: true,
-  
-  // Enable quick filters
-  allowQuickFilters: true
+  showToolbar?: boolean;          // (sidebar) show the toolbar with actions
+  editMode?: boolean;             // (sidebar) enable inline editing
+  directBooleanToggle?: boolean;  // (sidebar, requires editMode) single-click boolean toggle
+  languageCodeField?: string;     // (sidebar) language-code field for translations (default 'languages_code')
+  customFieldNames?: Record<string, string>;                 // per-column header label overrides
+  columnDisplays?: Record<string, { template: string; display?: string }>; // per-column display templates
+  showSelect?: boolean;           // show row-selection checkboxes
+  spacing?: 'compact' | 'cozy' | 'comfortable';              // row height
+  align?: Record<string, 'left' | 'center' | 'right'>;       // per-column text alignment
+  widths?: Record<string, number>;                           // per-column widths
+  quickFilters?: QuickFilter[];   // saved quick filters
 }
 ```
 
 ## API Reference
 
 ### Events
-The extension emits the following events:
+As a Directus layout, the component emits the standard layout sync events:
 
 - `update:selection` - When item selection changes
-- `update:filters` - When filters are modified
-- `update:search` - When search query changes
-- `update:limit` - When page size changes
-- `update:page` - When current page changes
-- `update:sort` - When sort order changes
-- `update:fields` - When visible fields change
+- `update:layoutOptions` - When a layout option changes (column displays, edit mode, alignment, widths, …)
+- `update:layoutQuery` - When the query changes (fields, sort, page, limit)
+- `update:search` - When the search query changes
+
+The `filter` prop is consumed read-only (filtering is driven by Directus), so no
+`update:filter` event is emitted.
 
 ### Composables
 Available composables for extension development:
 
-- `useApi()` - API operations wrapper
+- `useTableApi()` - API operations wrapper (fetch, count, update, delete, export)
 - `useAliasFields()` - Field aliasing for complex queries
-- `useLanguageSelector()` - Translation language management
+- `useColumnDisplays()` - Per-column display-template overrides
 
 ## Browser Support
 
@@ -349,14 +375,14 @@ Contributions are welcome! Please follow these guidelines:
 - Try clearing browser cache
 
 ### Inline editing not working
-- Check field permissions in Directus
-- Ensure fields are not read-only
-- Verify field types are supported
+- Make sure "Edit Mode" is enabled in the Layout Options sidebar
+- Check field permissions in Directus (no update permission = read-only)
+- Ensure fields are not configured as read-only
+- Note: relational fields (M2O, O2M, M2M, M2A) are display-only by design
 
 ### Performance issues
-- Reduce default row count
-- Enable pagination for large datasets
-- Check browser console for errors
+- Choose a smaller page size (the per-page selector defaults to 25)
+- Check the browser console for errors
 
 ## Changelog
 
