@@ -24,8 +24,8 @@
         @input="form.template = $event ?? ''"
       />
       <div v-if="m2aHelp" class="hint">
-        Many-to-Any field — use <code>{{ itemToken }}</code> (no
-        <code>{{ m2aHelp.fieldKey }}.</code> prefix).
+        Many-to-Any field — pick fields from the tree, or write
+        <code>{{ itemToken }}</code> by hand.
       </div>
     </div>
 
@@ -103,10 +103,10 @@ const m2aHelp = computed(() => {
     : '{{collection}}: {{item:<collection>.name}}';
   const allowed = collections.length ? `Allowed collections: ${collections.join(', ')}. ` : '';
   const tooltip =
-    `Many-to-Any field. Write tokens relative to the field (no "${rootField}." prefix). ` +
-    `Use ${collectionToken} for the target collection and ${itemToken} for its values. ` +
+    `Many-to-Any field. Pick fields from the template tree, or write tokens by hand: ` +
+    `${collectionToken} for the target collection and ${itemToken} for its values. ` +
     `${allowed}Example: ${example}`;
-  return { fieldKey: rootField, collections, example, tooltip };
+  return { tooltip };
 });
 
 const canSave = computed(() => {

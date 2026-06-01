@@ -33,6 +33,13 @@ export function parseTemplateTokens(template: string): string[] {
 }
 
 /**
+ * Conventional token for the M2A discriminator, accepted on both the query and
+ * render sides regardless of the relation's actual `one_collection_field` name
+ * (which it usually is anyway). Kept here so both sides resolve it identically.
+ */
+export const M2A_COLLECTION_TOKEN = 'collection';
+
+/**
  * Grammar for a per-collection M2A template token: `item:collection.path`
  * (e.g. `item:articles.title`). Captures [, prefix, collection, path].
  */
@@ -63,6 +70,30 @@ export function buildM2AFieldPath(
   path: string
 ): string {
   return `${fieldKey}.${itemField}:${collection}.${path}`;
+}
+
+/**
+ * Whether a token prefix addresses this M2A relation, once any parent field-key
+ * prefix has been stripped (see `stripM2AFieldPrefix`). The polymorphic item
+ * field (`item:col.field`) is the picker/conventional form; the parent field
+ * name is also accepted for hand-written `field:col.field` shorthand.
+ */
+export function isM2APrefix(prefix: string, fieldName: string, itemField: string): boolean {
+  return prefix === fieldName || prefix === itemField || prefix === 'item';
+}
+
+/**
+ * Strip the parent field-key prefix the native display-template picker prepends
+ * to M2A tokens. Rooted at the parent collection (M2A has no single related
+ * collection to root at), the picker emits `treatment.collection` and
+ * `treatment.item:service.name`; stripping `<fieldName>.` makes them field-
+ * relative (`collection`, `item:service.name`), matching a hand-written
+ * template. Returns the token unchanged when it carries no such prefix.
+ */
+export function stripM2AFieldPrefix(token: string, fieldName: string): string {
+  if (!fieldName) return token;
+  const prefix = `${fieldName}.`;
+  return token.startsWith(prefix) ? token.slice(prefix.length) : token;
 }
 
 interface RelationsStoreLike {

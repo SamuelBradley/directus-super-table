@@ -37,7 +37,7 @@ Smart image handling with an enlarged hover preview, proper aspect ratios, and a
 Duplicate items with all their relationships and translations. Perfect for creating variations of complex data structures.
 
 ### 🧩 Many-to-Any (M2A) Display
-Render polymorphic Many-to-Any relationships directly in the table. Use the `related-values` display or a per-column template with the `{{item:collection.field}}` syntax — including nested chains like `{{item:partners_catalog.catalog_id.title}}`. Each junction row resolves against its own target collection.
+Render polymorphic Many-to-Any relationships directly in the table — built straight from the native field picker or by hand. Use `{{item:<collection>.<field>}}` for a target's fields (nested chains like `{{item:partners_catalog.catalog_id.title}}` work), `{{collection}}` for the discriminator, and bare tokens like `{{code}}` for parent-row fields. Each junction row resolves against its own target collection.
 
 
 
@@ -164,24 +164,28 @@ sidebar under **Layout Options → Column Displays**:
 3. **Templates** use the `{{ field }}` mustache syntax and may reference related fields
 
 #### Many-to-Any (M2A) templates
-M2A fields are polymorphic — each row points at one of several target collections —
-so their templates use a dedicated `item:` syntax. Tokens are written **relative to
-the field** (do not prefix the field name):
+M2A fields are polymorphic — each junction row points at one of several target
+collections. Build the template straight from the **native field picker** (it now
+resolves correctly), or write tokens by hand. Tokens resolve per junction row; on a
+name clash the most specific (deepest) match wins:
 
-- `{{collection}}` — the name of the row's target collection
-- `{{item:<collection>.<field>}}` — a field on a specific target collection
-- Nested paths are supported, e.g. `{{item:partners_catalog.catalog_id.title}}`
-  (M2A → M2O → value)
+- `{{item:<collection>.<field>}}` — a field on a specific target collection;
+  nested paths work, e.g. `{{item:partners_catalog.catalog_id.title}}` (M2A → M2O → value)
+- `{{collection}}` — the name of the row's target collection (the discriminator)
+- The field-key-prefixed forms the picker emits also work, e.g.
+  `{{treatment.collection}}`, `{{treatment.item:service.name}}`, or a junction
+  column like `{{treatment.sort}}`
+- `{{<parentField>}}` — a bare token reads a field on the parent row, e.g.
+  `{{code}}` shows the order's own code next to each item
 
-Each junction row only resolves the token whose `<collection>` matches its own
+Each junction row only resolves the item token whose `<collection>` matches its own
 target, so a template can cover every allowed collection at once:
 
 ```
 {{collection}}: {{item:partners_catalog.name}} {{item:service.name}}
 ```
 
-The editor shows the allowed collections and an example for the selected field. A
-bare token (e.g. `{{name}}`) is intentionally dropped for M2A — use the `item:` form.
+The editor shows the allowed collections and an example for the selected field.
 
 ### Bookmarks
 Save table configurations for quick access:

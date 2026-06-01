@@ -5,6 +5,35 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.5.1 — M2A picker templates, field scopes & guard fix (Issue #60)
+
+### Fixed
+- **M2A column displays built with the native picker showed an empty cell.**
+  Rooted at the parent collection, the picker emits field-key-prefixed tokens
+  (`{{treatment.collection}}`, `{{treatment.item:service.name}}`) — not the
+  hand-written `{{item:...}}` form the renderer expected. A shared
+  `stripM2AFieldPrefix` helper now normalises both forms on the query and render
+  sides, so picked templates resolve correctly.
+- **Discriminator-only / non-item templates blanked the whole cell.** A template
+  with no `item:` token (e.g. `{{collection}}`) made the API omit the junction
+  `item`, and a guard then skipped every row as if the item were
+  permission-denied. The guard now distinguishes a not-fetched item
+  (`undefined`) from a genuinely absent one (`null`), so these templates render.
+
+### Added
+- **Parent-row and junction-level fields in M2A templates.** Bare tokens
+  (`{{code}}`) resolve against the parent row and field-prefixed tokens
+  (`{{treatment.sort}}`) against the junction row, alongside the discriminator
+  and per-collection `item:` values. On a name clash the most specific (deepest)
+  token wins. Every token is validated against its target before the request, so
+  an unknown token is dropped instead of 403'ing.
+
+### Refactor
+- M2A junction-row rendering extracted into a pure, unit-tested `buildM2ASegments`
+  helper; `resolveM2ARelation` now also reports the junction collection. The
+  conventional `collection` discriminator token lives in `displayHeuristics` and
+  is shared by the query and render sides so they cannot drift.
+
 ## v0.5.0 — Many-to-Any support (Issue #60)
 
 ### Added

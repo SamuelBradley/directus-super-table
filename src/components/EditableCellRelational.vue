@@ -192,7 +192,7 @@ import TagCell from './TagCell.vue';
 import { isFieldEditable, getFieldEditWarning, getFieldSupportLevel } from '../utils/fieldSupport';
 import { pickHeuristic, isM2A } from '../utils/displayHeuristics';
 import { resolveM2ARelation } from '../utils/resolveM2ARelation';
-import { renderM2ATemplate } from '../utils/renderM2ATemplate';
+import { buildM2ASegments, isBlockedSegment, type M2ASegment } from '../utils/buildM2ASegments';
 import { resolveTranslationValue } from '../utils/resolveTranslationValue';
 import { usePermissions } from '../composables/usePermissions';
 
@@ -401,16 +401,11 @@ const displayValue = computed(() => {
 
 const isM2AField = computed(() => isM2A(props.field));
 
-// M2A cells render structurally so each junction row can show either its
-// resolved template value or a `block` icon when its target collection is not
-// readable by the current user.
-type M2ASegment = { text: string } | { blocked: true; collection: string };
-
+// M2A cells render structurally (see buildM2ASegments) so each junction row can
+// show either its resolved template value or a `block` icon when its target
+// collection is not readable by the current user.
 const m2aSegments = computed<M2ASegment[]>(() => {
   if (!isM2AField.value) return [];
-  const relationalValue = props.item[props.fieldKey];
-  if (!Array.isArray(relationalValue) || relationalValue.length === 0) return [];
-
   const collection = props.field?.collection;
   const fieldName = props.field?.field;
   const m2a =
@@ -425,26 +420,16 @@ const m2aSegments = computed<M2ASegment[]>(() => {
     props.field?.meta?.display_options?.template ||
     `{{${m2a.discriminator}}}`;
 
-  const segments: M2ASegment[] = [];
-  for (const row of relationalValue) {
-    if (!row || typeof row !== 'object') continue;
-    const rowCollection = row[m2a.discriminator];
-    // Missing item: only a permission denial (not a dangling FK) earns the icon.
-    if (rowCollection && row[m2a.itemField] == null) {
-      if (!permissions.canRead(String(rowCollection))) {
-        segments.push({ blocked: true, collection: String(rowCollection) });
-      }
-      continue;
-    }
-    const text = renderM2ATemplate(row, template, m2a.itemField, m2a.discriminator).trim();
-    if (text && text !== '—') segments.push({ text });
-  }
-  return segments;
+  return buildM2ASegments(
+    props.item[props.fieldKey],
+    template,
+    m2a.itemField,
+    m2a.discriminator,
+    String(fieldName),
+    props.item,
+    (c) => permissions.canRead(c)
+  );
 });
-
-function isBlockedSegment(seg: M2ASegment): seg is { blocked: true; collection: string } {
-  return 'blocked' in seg;
-}
 
 type ResolvedDisplay = {
   display: string | null;

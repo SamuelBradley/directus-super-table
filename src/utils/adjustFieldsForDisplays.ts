@@ -8,6 +8,9 @@ import {
   pickHeuristic,
   parseM2AToken,
   buildM2AFieldPath,
+  isM2APrefix,
+  stripM2AFieldPrefix,
+  M2A_COLLECTION_TOKEN,
 } from './displayHeuristics';
 import { resolveM2ARelation } from './resolveM2ARelation';
 
@@ -160,26 +163,54 @@ export function expandTokensThroughRelation(
   if (isM2A) {
     const m2a = resolveM2ARelation(parentCollection, fieldKey, relationsStore, fieldsStore);
     if (!m2a) return [];
-    const { itemField, discriminator, allowedCollections } = m2a;
+    const { itemField, discriminator, allowedCollections, junctionCollection } = m2a;
 
     // The discriminator is always needed so the renderer knows which target
     // collection each row points at before resolving per-collection tokens.
     const expanded: string[] = [`${fieldKey}.${discriminator}`];
-    for (const tok of tokens) {
-      if (tok === discriminator) continue;
-      // Per-collection M2A token: "item:collection.path". Bare tokens are dropped
-      // on purpose — they would resolve against the wrong collection and 403.
+    const add = (path: string) => {
+      if (!expanded.includes(path)) expanded.push(path);
+    };
+
+    for (const rawTok of tokens) {
+      // The native picker prefixes relation tokens with the field key. A prefix
+      // means a junction/item field; a bare token is a parent-level field.
+      const hadPrefix = rawTok.startsWith(`${fieldKey}.`);
+      const tok = stripM2AFieldPrefix(rawTok, fieldKey);
+      // The discriminator (and its conventional `collection` alias) is always
+      // emitted above; skip so it's never re-emitted as a junction/parent field.
+      if (tok === discriminator || tok === M2A_COLLECTION_TOKEN) continue;
+
+      // Per-collection item token: "item:collection.path".
       const parsed = parseM2AToken(tok);
-      if (!parsed) continue;
-      const { prefix, collection: col, path } = parsed;
-      if (prefix !== itemField && prefix !== 'item') continue;
-      if (allowedCollections.length > 0 && !allowedCollections.includes(col)) continue;
-      // Only the first path segment is validated against the target — deep
-      // leaves are unvalidated, matching the M2M/M2O branches below.
-      const firstSegment = (path.split('.')[0] ?? '') as string;
-      if (!fieldsStore.getField(col, firstSegment)) continue;
-      const expandedPath = buildM2AFieldPath(fieldKey, itemField, col, path);
-      if (!expanded.includes(expandedPath)) expanded.push(expandedPath);
+      if (parsed && isM2APrefix(parsed.prefix, fieldKey, itemField)) {
+        const { collection: col, path } = parsed;
+        if (allowedCollections.length > 0 && !allowedCollections.includes(col)) continue;
+        // Only the first path segment is validated against the target — deep
+        // leaves are unvalidated, matching the M2M/M2O branches below.
+        const firstSegment = (path.split('.')[0] ?? '') as string;
+        if (!fieldsStore.getField(col, firstSegment)) continue;
+        add(buildM2AFieldPath(fieldKey, itemField, col, path));
+        continue;
+      }
+
+      const firstSegment = (tok.split('.')[0] ?? '') as string;
+      if (!firstSegment) continue;
+
+      if (hadPrefix) {
+        // Junction-level field (e.g. `treatment.sort`); validate against the
+        // junction so an unknown token never reaches the API and 403s.
+        if (junctionCollection && fieldsStore.getField(junctionCollection, firstSegment)) {
+          add(`${fieldKey}.${tok}`);
+        }
+        continue;
+      }
+
+      // Bare token → parent-level field (e.g. `code`), fetched at the top level.
+      // Validated against the parent so a stray token is dropped, not 403'd.
+      if (fieldsStore.getField(parentCollection, firstSegment)) {
+        add(tok);
+      }
     }
     return expanded;
   }

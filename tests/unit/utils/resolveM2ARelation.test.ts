@@ -4,6 +4,7 @@ import { resolveM2ARelation } from '@/utils/resolveM2ARelation';
 // Mirrors the live orders.treatment shape: the junction's polymorphic `item`
 // relation carries the collection discriminator and the allowed collections.
 const itemRelation = {
+  collection: 'orders_treatment',
   field: 'item',
   meta: {
     one_collection_field: 'collection',
@@ -11,12 +12,13 @@ const itemRelation = {
   },
 };
 const parentRelation = {
+  collection: 'orders_treatment',
   field: 'orders_id',
   meta: { one_collection_field: null },
 };
 
 describe('resolveM2ARelation', () => {
-  it('resolves itemField, discriminator and allowedCollections from the item relation', () => {
+  it('resolves itemField, discriminator, allowedCollections and junctionCollection', () => {
     const relationsStore = {
       getRelationsForField: vi.fn().mockReturnValue([parentRelation, itemRelation]),
     };
@@ -24,6 +26,7 @@ describe('resolveM2ARelation', () => {
       itemField: 'item',
       discriminator: 'collection',
       allowedCollections: ['partners_catalog', 'service'],
+      junctionCollection: 'orders_treatment',
     });
   });
 
@@ -43,6 +46,17 @@ describe('resolveM2ARelation', () => {
     expect(resolveM2ARelation('orders', 'treatment', relationsStore)?.allowedCollections).toEqual(
       []
     );
+  });
+
+  it('returns junctionCollection null when the relation carries no collection', () => {
+    const relationsStore = {
+      getRelationsForField: vi.fn().mockReturnValue([
+        { field: 'item', meta: { one_collection_field: 'collection' } },
+      ]),
+    };
+    expect(
+      resolveM2ARelation('orders', 'treatment', relationsStore)?.junctionCollection
+    ).toBeNull();
   });
 
   it('returns null when no relation carries one_collection_field', () => {
@@ -83,6 +97,7 @@ describe('resolveM2ARelation — permission fallback', () => {
   const parentOnly = {
     getRelationsForField: vi.fn().mockReturnValue([
       {
+        collection: 'orders_treatment',
         field: 'orders_id',
         meta: { one_field: 'treatment', junction_field: 'item', one_collection_field: null },
       },
@@ -99,6 +114,7 @@ describe('resolveM2ARelation — permission fallback', () => {
       itemField: 'item',
       discriminator: 'collection',
       allowedCollections: ['partners_catalog', 'service'],
+      junctionCollection: 'orders_treatment',
     });
   });
 
@@ -107,6 +123,7 @@ describe('resolveM2ARelation — permission fallback', () => {
       itemField: 'item',
       discriminator: 'collection',
       allowedCollections: [],
+      junctionCollection: 'orders_treatment',
     });
   });
 
