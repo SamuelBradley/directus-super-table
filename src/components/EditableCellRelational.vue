@@ -137,6 +137,29 @@
     </template>
   </InlineEditPopover>
 
+  <!-- M2A: render each junction row, with a block icon for rows whose target
+       collection the current user cannot read -->
+  <div
+    v-else-if="isM2AField"
+    class="editable-cell relational"
+    :style="{ textAlign: props.align || 'left' }"
+  >
+    <span v-if="m2aSegments.length === 0" class="template-display">—</span>
+    <span v-else class="template-display">
+      <template v-for="(seg, i) in m2aSegments" :key="i">
+        <span v-if="i > 0">, </span>
+        <v-icon
+          v-if="isBlockedSegment(seg)"
+          v-tooltip="`No permission to read ${seg.collection}`"
+          name="block"
+          x-small
+          class="m2a-blocked-icon"
+        />
+        <span v-else>{{ seg.text }}</span>
+      </template>
+    </span>
+  </div>
+
   <!-- ABSOLUTE PRIORITY: Display templates for relational fields -->
   <div
     v-else-if="resolvedDisplay.display !== null"
@@ -167,7 +190,9 @@ import RelationalCell from './CellRenderers/RelationalCell.vue';
 import ColorCell from './CellRenderers/ColorCell.vue';
 import TagCell from './TagCell.vue';
 import { isFieldEditable, getFieldEditWarning, getFieldSupportLevel } from '../utils/fieldSupport';
-import { pickHeuristic } from '../utils/displayHeuristics';
+import { pickHeuristic, isM2A } from '../utils/displayHeuristics';
+import { resolveM2ARelation } from '../utils/resolveM2ARelation';
+import { renderM2ATemplate } from '../utils/renderM2ATemplate';
 import { resolveTranslationValue } from '../utils/resolveTranslationValue';
 import { usePermissions } from '../composables/usePermissions';
 
@@ -251,6 +276,11 @@ const actualFieldKey = computed(() => {
   return props.fieldKey;
 });
 
+// columnDisplays is keyed by the root field (no language suffix).
+const storageKey = computed(() =>
+  props.fieldKey.includes(':') ? props.fieldKey.split(':')[0] : props.fieldKey
+);
+
 const displayValue = computed(() => {
   // For edited values
   if (props.edits !== undefined) {
@@ -271,8 +301,7 @@ const displayValue = computed(() => {
 
   // Display-template resolution priority: column-display override →
   // field's own display template → relational heuristic → none.
-  const storageKey = props.fieldKey.includes(':') ? props.fieldKey.split(':')[0] : props.fieldKey;
-  const override = props.columnDisplays?.[storageKey];
+  const override = props.columnDisplays?.[storageKey.value];
   const fieldTemplate =
     props.field?.displayOptions?.template || props.field?.meta?.display_options?.template;
 
@@ -299,6 +328,13 @@ const displayValue = computed(() => {
     void isOverridePath;
     void isHeuristicPath;
     let valueForTemplate = relationalValue;
+
+    // M2A is rendered structurally (see m2aSegments) so blocked rows can show
+    // an icon; the string path below only covers non-M2A relations.
+    if (isM2AField.value) {
+      return '';
+    }
+
     // M2M: unwrap junction items through junction_field so the template
     // resolves against the target row, not the pivot row.
     const needsM2MUnwrap =
@@ -363,6 +399,53 @@ const displayValue = computed(() => {
   return props.item[props.fieldKey];
 });
 
+const isM2AField = computed(() => isM2A(props.field));
+
+// M2A cells render structurally so each junction row can show either its
+// resolved template value or a `block` icon when its target collection is not
+// readable by the current user.
+type M2ASegment = { text: string } | { blocked: true; collection: string };
+
+const m2aSegments = computed<M2ASegment[]>(() => {
+  if (!isM2AField.value) return [];
+  const relationalValue = props.item[props.fieldKey];
+  if (!Array.isArray(relationalValue) || relationalValue.length === 0) return [];
+
+  const collection = props.field?.collection;
+  const fieldName = props.field?.field;
+  const m2a =
+    collection && fieldName
+      ? resolveM2ARelation(collection, fieldName, relationsStore, fieldsStore)
+      : null;
+  if (!m2a) return [];
+
+  const template =
+    props.columnDisplays?.[storageKey.value]?.template ||
+    props.field?.displayOptions?.template ||
+    props.field?.meta?.display_options?.template ||
+    `{{${m2a.discriminator}}}`;
+
+  const segments: M2ASegment[] = [];
+  for (const row of relationalValue) {
+    if (!row || typeof row !== 'object') continue;
+    const rowCollection = row[m2a.discriminator];
+    // Missing item: only a permission denial (not a dangling FK) earns the icon.
+    if (rowCollection && row[m2a.itemField] == null) {
+      if (!permissions.canRead(String(rowCollection))) {
+        segments.push({ blocked: true, collection: String(rowCollection) });
+      }
+      continue;
+    }
+    const text = renderM2ATemplate(row, template, m2a.itemField, m2a.discriminator).trim();
+    if (text && text !== '—') segments.push({ text });
+  }
+  return segments;
+});
+
+function isBlockedSegment(seg: M2ASegment): seg is { blocked: true; collection: string } {
+  return 'blocked' in seg;
+}
+
 type ResolvedDisplay = {
   display: string | null;
   options: Record<string, unknown>;
@@ -370,12 +453,9 @@ type ResolvedDisplay = {
 };
 
 const resolvedDisplay = computed<ResolvedDisplay>(() => {
-  // Storage key for translations is the root (no language suffix)
-  const storageKey = props.fieldKey.includes(':') ? props.fieldKey.split(':')[0] : props.fieldKey;
-
   // 1. Layout-level override (renders via related-values unless the user
   //    explicitly stored a different display id alongside the template)
-  const override = props.columnDisplays?.[storageKey];
+  const override = props.columnDisplays?.[storageKey.value];
   if (override?.template) {
     return {
       display: override.display ?? 'related-values',
@@ -700,6 +780,10 @@ function navigateToPrevCell() {
 </script>
 
 <style scoped>
+.m2a-blocked-icon {
+  --v-icon-color: var(--foreground-subdued);
+  vertical-align: middle;
+}
 .editable-cell.relational,
 .editable-cell.non-editable {
   position: relative;

@@ -45,7 +45,7 @@
     </div>
     <!-- Main Table -->
     <v-table
-      v-if="loading || ((itemCount > 0 || items.length > 0) && !error)"
+      v-if="loading || hasRenderableData"
       ref="tableRef"
       v-model="selectionWritable"
       v-model:headers="tableHeadersWritable"
@@ -218,6 +218,14 @@
       </template>
     </v-table>
 
+    <!-- Error State when the items request failed -->
+    <div v-else-if="!loading && error" class="no-data">
+      <div class="padding-box">
+        <v-icon name="error_outline" large />
+        <p>{{ t('unexpected_error') }}</p>
+      </div>
+    </div>
+
     <!-- Empty State when no items and not loading -->
     <div v-else-if="!loading && !error" class="no-data">
       <div class="padding-box">
@@ -231,7 +239,7 @@
     </div>
 
     <!-- Pagination Footer -->
-    <div class="footer" v-if="itemCount > 0 || items.length > 0">
+    <div class="footer" v-if="hasRenderableData">
       <div class="pagination">
         <v-pagination
           v-if="totalPages > 1"
@@ -796,16 +804,17 @@ const deep = computed(() => {
       // Check if this field is relational by looking at field metadata
       const fieldMeta = fieldsStore.getField(collection.value, actualField);
 
+      const special = fieldMeta?.meta?.special ?? [];
       if (
-        fieldMeta?.meta?.special?.includes('m2o') ||
-        fieldMeta?.meta?.special?.includes('o2m') ||
-        fieldMeta?.meta?.special?.includes('m2m') ||
-        fieldMeta?.meta?.special?.includes('m2a')
+        special.includes('m2o') ||
+        special.includes('o2m') ||
+        special.includes('m2m') ||
+        special.includes('m2a')
       ) {
         if (!deepFields[actualField]) {
-          deepFields[actualField] = {
-            _fields: ['*'],
-          };
+          deepFields[actualField] = special.includes('m2a')
+            ? { _fields: ['*'], _limit: -1 } // fetch every polymorphic row, not just the first page
+            : { _fields: ['*'] };
         }
       }
     }
@@ -957,6 +966,12 @@ const totalPages = computed(() => {
   if (!itemCount.value || !limit.value) return 1;
   return Math.ceil(itemCount.value / limit.value);
 });
+
+// A failed items fetch leaves the count populated (separate request), so gate
+// table + footer on this to avoid a blank body under a live pagination bar.
+const hasRenderableData = computed(
+  () => (itemCount.value > 0 || items.value.length > 0) && !error.value
+);
 
 // Items + count are fetched as two separate requests so users without read
 // permission on the PK still see a populated table — `meta=filter_count`

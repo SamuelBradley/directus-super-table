@@ -235,3 +235,88 @@ describe('adjustFieldsForDisplays — override branch M2M validation (issue #55)
     expect(result).toContain('tags.tag_id.label');
   });
 });
+
+describe('adjustFieldsForDisplays — M2A (issue #60)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  // Mirrors the live orders.treatment M2A: junction orders_treatment with a
+  // `collection` discriminator and a polymorphic `item` FK to two collections.
+  const mockM2A = (displayTemplate?: string) =>
+    vi.doMock('@directus/extensions-sdk', () => ({
+      useStores: () => ({
+        useFieldsStore: () => ({
+          getField: (col: string, f: string) => {
+            if (col === 'orders' && f === 'treatment')
+              return {
+                field: 'treatment',
+                collection: 'orders',
+                meta: {
+                  special: ['m2a'],
+                  ...(displayTemplate
+                    ? { display: 'related-values', display_options: { template: displayTemplate } }
+                    : {}),
+                },
+              };
+            if (col === 'partners_catalog' && (f === 'name' || f === 'catalog_id'))
+              return { field: f };
+            if (col === 'service' && f === 'name') return { field: 'name' };
+            return null;
+          },
+          getFieldsForCollection: () => [],
+        }),
+        useRelationsStore: () => ({
+          getRelationsForField: (col: string, f: string) =>
+            col === 'orders' && f === 'treatment'
+              ? [
+                  {
+                    collection: 'orders_treatment',
+                    field: 'orders_id',
+                    related_collection: 'orders',
+                    meta: { junction_field: 'item' },
+                  },
+                  {
+                    collection: 'orders_treatment',
+                    field: 'item',
+                    related_collection: null,
+                    meta: {
+                      one_collection_field: 'collection',
+                      one_allowed_collections: ['partners_catalog', 'service'],
+                      junction_field: 'orders_id',
+                    },
+                  },
+                ]
+              : [],
+        }),
+      }),
+      useCollection: () => ({ primaryKeyField: { value: { field: 'id' } } }),
+      useExtensions: () => ({ displays: { value: [] } }),
+    }));
+
+  it('expands a related-values M2A template into per-collection item paths', async () => {
+    mockM2A('{{collection}}: {{item:partners_catalog.catalog_id.title}} {{item:service.name}}');
+    const { adjustFieldsForDisplays } = await import('@/utils/adjustFieldsForDisplays');
+    const result = adjustFieldsForDisplays(['treatment'], 'orders');
+    expect(result).toEqual(
+      expect.arrayContaining([
+        'treatment.collection',
+        'treatment.item:partners_catalog.catalog_id.title',
+        'treatment.item:service.name',
+      ])
+    );
+  });
+
+  it('never emits an invalid bare M2A path from a column-display override', async () => {
+    mockM2A();
+    const { adjustFieldsForDisplays } = await import('@/utils/adjustFieldsForDisplays');
+    const result = adjustFieldsForDisplays(['code', 'treatment'], 'orders', {
+      treatment: { template: '{{code}}' },
+    });
+    // The bare token must be dropped — these paths would 403 against the junction.
+    expect(result).not.toContain('treatment.code');
+    expect(result).not.toContain('treatment.item');
+    expect(result).not.toContain('treatment.id');
+    expect(result).toContain('treatment.collection');
+  });
+});

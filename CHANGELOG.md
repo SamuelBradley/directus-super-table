@@ -5,6 +5,40 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.5.0 — Many-to-Any support (Issue #60)
+
+### Added
+- **Many-to-Any (M2A) fields are now supported** as display columns. The
+  `related-values` display and per-column overrides resolve the polymorphic
+  `item:collection.field` template syntax, including nested chains such as
+  `{{item:partners_catalog.catalog_id.title}}` (M2A → M2O → scalar). Each
+  junction row renders against its own collection discriminator. Reported by
+  @Abdallah-Awwad in #60.
+- **In-body error state:** when the items request fails, the layout now shows
+  an explicit error notice instead of a blank body under a live pagination bar.
+
+### Fixed
+- **M2A raw template / empty cell:** M2A columns previously rendered the literal
+  display template (or an empty cell) because the query never expanded the
+  per-collection `item:` paths and the renderer never unwrapped the junction
+  rows. Both paths now handle M2A.
+- **M2A column display → 0 results:** adding a column-display template on an M2A
+  field expanded into an invalid junction field path, 403'd the items request,
+  and blanked the table while pagination stayed visible. Invalid/bare tokens are
+  now dropped before the request, and the footer is gated on the same
+  renderable-data condition as the table.
+
+### Refactor
+- New `resolveM2ARelation` helper centralises the M2A junction-shape lookup
+  (discriminator, item field, allowed collections) in one place, mirroring the
+  `resolveTranslationsCollection` pattern — replacing three hand-written copies
+  across the query and render layers.
+- M2A template grammar (`M2A_TOKEN_RE`, `parseM2AToken`, `buildM2AFieldPath`)
+  now lives in `displayHeuristics`, so the field-path emit and the render-side
+  read share a single source and cannot drift.
+- Cell rendering reuses `get` from `@directus/utils` for nested-path access
+  instead of a bespoke walker.
+
 ## v0.4.2 — Marketplace metadata
 
 ### Changed

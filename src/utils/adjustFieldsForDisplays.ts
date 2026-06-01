@@ -1,7 +1,15 @@
 // CORE CHANGES - Following original Directus approach
 import { useStores, useCollection } from '@directus/extensions-sdk';
 import type { ColumnDisplay } from '../composables/useColumnDisplays';
-import { parseTemplateTokens, isRelational, pickHeuristic } from './displayHeuristics';
+import {
+  parseTemplateTokens,
+  isRelational,
+  isM2A,
+  pickHeuristic,
+  parseM2AToken,
+  buildM2AFieldPath,
+} from './displayHeuristics';
+import { resolveM2ARelation } from './resolveM2ARelation';
 
 /**
  * Helper function to get the related collection for a field
@@ -98,6 +106,12 @@ function getDisplayFieldsForRelation(
     return null; // Let deep parameter with _fields: ['*'] handle it
   }
 
+  // M2A target is polymorphic; the bare deep parameter supplies the data and
+  // requesting a fixed PK against the junction would 403.
+  if (isM2A(field)) {
+    return null;
+  }
+
   const fieldName = (field.field || field.key)?.split('.')[0];
   const relatedCollection = getRelatedCollection(parentCollection, fieldName, relationsStore);
 
@@ -136,10 +150,38 @@ export function expandTokensThroughRelation(
 ): string[] {
   if (!tokens.length) return [];
   const isM2M = field?.meta?.special?.includes('m2m') === true;
+  const isM2A = field?.meta?.special?.includes('m2a') === true;
   const isTranslations = field?.meta?.special?.includes('translations') === true;
 
   if (isTranslations) {
     return tokens.map((tok) => `${fieldKey}.${tok}`);
+  }
+
+  if (isM2A) {
+    const m2a = resolveM2ARelation(parentCollection, fieldKey, relationsStore, fieldsStore);
+    if (!m2a) return [];
+    const { itemField, discriminator, allowedCollections } = m2a;
+
+    // The discriminator is always needed so the renderer knows which target
+    // collection each row points at before resolving per-collection tokens.
+    const expanded: string[] = [`${fieldKey}.${discriminator}`];
+    for (const tok of tokens) {
+      if (tok === discriminator) continue;
+      // Per-collection M2A token: "item:collection.path". Bare tokens are dropped
+      // on purpose — they would resolve against the wrong collection and 403.
+      const parsed = parseM2AToken(tok);
+      if (!parsed) continue;
+      const { prefix, collection: col, path } = parsed;
+      if (prefix !== itemField && prefix !== 'item') continue;
+      if (allowedCollections.length > 0 && !allowedCollections.includes(col)) continue;
+      // Only the first path segment is validated against the target — deep
+      // leaves are unvalidated, matching the M2M/M2O branches below.
+      const firstSegment = (path.split('.')[0] ?? '') as string;
+      if (!fieldsStore.getField(col, firstSegment)) continue;
+      const expandedPath = buildM2AFieldPath(fieldKey, itemField, col, path);
+      if (!expanded.includes(expandedPath)) expanded.push(expandedPath);
+    }
+    return expanded;
   }
 
   if (isM2M) {
@@ -175,7 +217,8 @@ export function expandTokensThroughRelation(
     (rel?.related_collection as string | undefined) ?? (rel?.collection as string | undefined);
   if (!target) {
     // Best-effort: return as-is when we have no target info to validate against.
-    return tokens.map((tok) => `${fieldKey}.${tok}`);
+    // M2A is handled above; never reach the wrong-collection emit for it.
+    return isM2A ? [] : tokens.map((tok) => `${fieldKey}.${tok}`);
   }
 
   const expanded: string[] = [];
@@ -303,8 +346,14 @@ export function adjustFieldsForDisplays(
         switch (displayId) {
           case 'related-values': {
             const template = field.meta?.display_options?.template;
+            const isM2A = field.meta?.special?.includes('m2a') === true;
             if (template) {
-              const templateTokens = extractFieldsFromTemplate(template);
+              // M2A tokens use the "item:collection.field" form whose colon/dot
+              // structure must stay intact, so use the prefix-preserving parser;
+              // other relation types keep the last-segment flattener.
+              const templateTokens = isM2A
+                ? parseTemplateTokens(template)
+                : extractFieldsFromTemplate(template);
               const expanded = expandTokensThroughRelation(
                 field,
                 fieldKey,
@@ -315,9 +364,13 @@ export function adjustFieldsForDisplays(
               );
 
               // PK path so the row can be keyed; M2M needs the junction prefix.
+              // M2A already carries its discriminator from the expander, and its
+              // per-collection PKs differ per target, so it needs no extra PK here.
               const isM2M = field.meta?.special?.includes('m2m') === true;
               let pkPath: string | null = null;
-              if (isM2M) {
+              if (isM2A) {
+                pkPath = null;
+              } else if (isM2M) {
                 const relations = relationsStore.getRelationsForField(parentCollection, fieldKey);
                 const rel = relations?.[0];
                 const junctionField = rel?.meta?.junction_field as string | undefined;
@@ -348,6 +401,16 @@ export function adjustFieldsForDisplays(
               displayFields =
                 pkPath && !expanded.includes(pkPath) ? [...expanded, pkPath] : expanded;
               if (displayFields.length === 0) displayFields = [fieldKey];
+            } else if (isM2A) {
+              // No template: the junction discriminator alone is servable; the
+              // bare alias would request invalid columns on the junction.
+              const discriminator = resolveM2ARelation(
+                parentCollection,
+                fieldKey,
+                relationsStore,
+                fieldsStore
+              )?.discriminator;
+              displayFields = discriminator ? [`${fieldKey}.${discriminator}`] : [fieldKey];
             } else {
               const rootField = (fieldKey.split('.')[0] ?? fieldKey) as string;
               const relatedCollection = getRelatedCollection(

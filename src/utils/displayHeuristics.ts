@@ -11,6 +11,12 @@ export function isRelational(field: { meta?: { special?: string[] } } | null | u
   return field.meta.special.some((s) => (RELATIONAL_SPECIALS as readonly string[]).includes(s));
 }
 
+export function isM2A(
+  field: { meta?: { special?: string[] | null } | null } | null | undefined
+): boolean {
+  return field?.meta?.special?.includes('m2a') === true;
+}
+
 /**
  * Pull the field tokens out of a display template. Whitespace is stripped,
  * duplicates are removed, dotted paths are kept intact (callers decide whether
@@ -24,6 +30,39 @@ export function parseTemplateTokens(template: string): string[] {
     .map((m) => m.replace(/\{\{\s*|\s*\}\}/g, '').trim())
     .filter((f) => f.length > 0);
   return [...new Set(fields)];
+}
+
+/**
+ * Grammar for a per-collection M2A template token: `item:collection.path`
+ * (e.g. `item:articles.title`). Captures [, prefix, collection, path].
+ */
+export const M2A_TOKEN_RE = /^([^:.]+):([^.]+)\.(.+)$/;
+
+/**
+ * Parse a per-collection M2A token. Returns `null` for tokens that aren't in
+ * the `prefix:collection.path` form (e.g. plain `{{collection}}` or bare keys).
+ */
+export function parseM2AToken(
+  token: string
+): { prefix: string; collection: string; path: string } | null {
+  const match = token.match(M2A_TOKEN_RE);
+  if (!match) return null;
+  const [, prefix, collection, path] = match;
+  return { prefix: prefix!, collection: collection!, path: path! };
+}
+
+/**
+ * Build the API field path for an M2A per-collection token, e.g.
+ * `treatment.item:partners_catalog.name`. Single source of the emit shape so
+ * the query side and the render side cannot drift.
+ */
+export function buildM2AFieldPath(
+  fieldKey: string,
+  itemField: string,
+  collection: string,
+  path: string
+): string {
+  return `${fieldKey}.${itemField}:${collection}.${path}`;
 }
 
 interface RelationsStoreLike {
