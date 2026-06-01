@@ -8,6 +8,7 @@ import {
   pickHeuristic,
   parseM2AToken,
   buildM2AFieldPath,
+  isM2APrefix,
 } from './displayHeuristics';
 import { resolveM2ARelation } from './resolveM2ARelation';
 
@@ -172,7 +173,9 @@ export function expandTokensThroughRelation(
       const parsed = parseM2AToken(tok);
       if (!parsed) continue;
       const { prefix, collection: col, path } = parsed;
-      if (prefix !== itemField && prefix !== 'item') continue;
+      // The picker emits the field name as prefix; a hand-written template may
+      // use `item`. fieldKey is the parent field name here.
+      if (!isM2APrefix(prefix, fieldKey, itemField)) continue;
       if (allowedCollections.length > 0 && !allowedCollections.includes(col)) continue;
       // Only the first path segment is validated against the target — deep
       // leaves are unvalidated, matching the M2M/M2O branches below.

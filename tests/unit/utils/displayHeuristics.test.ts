@@ -7,6 +7,7 @@ import {
   pickHeuristic,
   parseM2AToken,
   buildM2AFieldPath,
+  isM2APrefix,
 } from '@/utils/displayHeuristics';
 
 describe('isRelational', () => {
@@ -360,5 +361,20 @@ describe('buildM2AFieldPath', () => {
       collection: 'service',
       path: 'name',
     });
+  });
+});
+
+describe('isM2APrefix', () => {
+  it('accepts the parent field name (picker output)', () => {
+    expect(isM2APrefix('treatment', 'treatment', 'item')).toBe(true);
+  });
+
+  it('accepts the junction item field and the literal "item"', () => {
+    expect(isM2APrefix('item', 'treatment', 'item')).toBe(true);
+    expect(isM2APrefix('item', 'treatment', 'other_fk')).toBe(true);
+  });
+
+  it('rejects an unrelated prefix', () => {
+    expect(isM2APrefix('something', 'treatment', 'item')).toBe(false);
   });
 });

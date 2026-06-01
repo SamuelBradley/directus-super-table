@@ -316,6 +316,24 @@ describe('expandTokensThroughRelation', () => {
       ]);
     });
 
+    it('accepts the picker prefix (field name) as well as item', () => {
+      const { fieldsStore, relationsStore } = m2aStores();
+      // The native display-template picker emits `<fieldName>:collection.field`.
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['treatment:partners_catalog.name', 'treatment:service.name'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual([
+        'treatment.collection',
+        'treatment.item:partners_catalog.name',
+        'treatment.item:service.name',
+      ]);
+    });
+
     it('keeps nested item paths intact (M2A -> M2O -> scalar)', () => {
       const { fieldsStore, relationsStore } = m2aStores();
       const result = expandTokensThroughRelation(

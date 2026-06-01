@@ -1,9 +1,8 @@
 import { get } from '@directus/utils';
-import { parseM2AToken } from './displayHeuristics';
+import { parseM2AToken, isM2APrefix } from './displayHeuristics';
 
 /** Conventional M2A token aliases accepted alongside the resolved field names. */
 export const M2A_COLLECTION_TOKEN = 'collection';
-export const M2A_ITEM_TOKEN = 'item';
 
 /**
  * Render one M2A junction row against a related-values template.
@@ -16,7 +15,8 @@ export function renderM2ATemplate(
   row: Record<string, any> | null | undefined,
   template: string,
   itemField: string,
-  discriminator: string
+  discriminator: string,
+  fieldName: string
 ): string {
   if (!row || typeof row !== 'object') return '—';
   const rowCollection = row[discriminator];
@@ -30,7 +30,7 @@ export function renderM2ATemplate(
 
     const parsed = parseM2AToken(token);
     if (parsed) {
-      if (parsed.prefix !== itemField && parsed.prefix !== M2A_ITEM_TOKEN) return '';
+      if (!isM2APrefix(parsed.prefix, fieldName, itemField)) return '';
       // Only the branch matching this row's collection contributes a value.
       if (parsed.collection !== rowCollection) return '';
       return scalarOrEmpty(getNestedValue(item, parsed.path));

@@ -65,6 +65,15 @@ export function buildM2AFieldPath(
   return `${fieldKey}.${itemField}:${collection}.${path}`;
 }
 
+/**
+ * Whether a token prefix addresses this M2A relation. The native display-template
+ * picker emits the parent field name (`treatment:col.field`); a hand-written
+ * template may use `item:col.field`. Both are accepted.
+ */
+export function isM2APrefix(prefix: string, fieldName: string, itemField: string): boolean {
+  return prefix === fieldName || prefix === itemField || prefix === 'item';
+}
+
 interface RelationsStoreLike {
   getRelationsForField: (
     collection: string,

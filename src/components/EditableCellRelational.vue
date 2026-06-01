@@ -436,7 +436,13 @@ const m2aSegments = computed<M2ASegment[]>(() => {
       }
       continue;
     }
-    const text = renderM2ATemplate(row, template, m2a.itemField, m2a.discriminator).trim();
+    const text = renderM2ATemplate(
+      row,
+      template,
+      m2a.itemField,
+      m2a.discriminator,
+      String(fieldName)
+    ).trim();
     if (text && text !== '—') segments.push({ text });
   }
   return segments;
