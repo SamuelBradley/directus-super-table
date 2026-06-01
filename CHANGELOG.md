@@ -5,6 +5,16 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.5.1 — M2A template syntax fix (Issue #60)
+
+### Fixed
+- M2A column displays built with the native display-template picker showed an
+  empty cell. The picker emits tokens prefixed with the parent field name
+  (`{{treatment:collection.field}}`), while only the hand-written `{{item:...}}`
+  form was recognised. Both prefixes are now accepted on the query and render
+  sides (shared `isM2APrefix` helper), matching Directus core's
+  `render-template` behaviour.
+
 ## v0.5.0 — Many-to-Any support (Issue #60)
 
 ### Added
