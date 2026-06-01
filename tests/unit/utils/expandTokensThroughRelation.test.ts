@@ -261,4 +261,139 @@ describe('expandTokensThroughRelation', () => {
     );
     expect(result).toEqual([]);
   });
+
+  describe('M2A', () => {
+    // Mirrors the live `orders.treatment` shape: a junction with a `collection`
+    // discriminator and a polymorphic `item` FK to two allowed collections.
+    const m2aStores = () =>
+      makeStores(
+        {
+          'partners_catalog.name': { field: 'name' },
+          'partners_catalog.catalog_id': { field: 'catalog_id' },
+          'service.name': { field: 'name' },
+        },
+        {
+          'orders.treatment': [
+            {
+              collection: 'orders_treatment',
+              field: 'orders_id',
+              related_collection: 'orders',
+              meta: { junction_field: 'item' },
+            },
+            {
+              collection: 'orders_treatment',
+              field: 'item',
+              related_collection: null,
+              meta: {
+                one_collection_field: 'collection',
+                one_allowed_collections: ['partners_catalog', 'service'],
+                junction_field: 'orders_id',
+              },
+            },
+          ],
+        }
+      );
+    const m2aField = {
+      collection: 'orders',
+      field: 'treatment',
+      meta: { special: ['m2a'] },
+    } as any;
+
+    it('expands per-collection item tokens and always emits the discriminator', () => {
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['item:partners_catalog.name', 'item:service.name'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual([
+        'treatment.collection',
+        'treatment.item:partners_catalog.name',
+        'treatment.item:service.name',
+      ]);
+    });
+
+    it('keeps nested item paths intact (M2A -> M2O -> scalar)', () => {
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['item:partners_catalog.catalog_id.title'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual([
+        'treatment.collection',
+        'treatment.item:partners_catalog.catalog_id.title',
+      ]);
+    });
+
+    it('drops bare tokens so they never 403 against the junction', () => {
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['code', 'time'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual(['treatment.collection']);
+    });
+
+    it('drops tokens for collections outside one_allowed_collections', () => {
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['item:other_collection.name'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual(['treatment.collection']);
+    });
+
+    it('drops tokens whose field is missing on the target collection', () => {
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['item:service.nonexistent'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual(['treatment.collection']);
+    });
+
+    it('returns [] when the M2A item relation is missing (defensive)', () => {
+      const { fieldsStore, relationsStore } = makeStores(
+        {},
+        {
+          'orders.treatment': [
+            {
+              collection: 'orders_treatment',
+              field: 'orders_id',
+              related_collection: 'orders',
+              // NOTE: no one_collection_field relation present
+            },
+          ],
+        }
+      );
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['item:partners_catalog.name'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual([]);
+    });
+  });
 });

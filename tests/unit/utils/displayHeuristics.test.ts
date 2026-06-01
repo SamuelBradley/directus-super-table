@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   isRelational,
+  isM2A,
   parseTemplateTokens,
   resolveTargetCollection,
   pickHeuristic,
+  parseM2AToken,
+  buildM2AFieldPath,
 } from '@/utils/displayHeuristics';
 
 describe('isRelational', () => {
@@ -21,6 +24,22 @@ describe('isRelational', () => {
     expect(isRelational({ meta: {} } as any)).toBe(false);
     expect(isRelational({} as any)).toBe(false);
     expect(isRelational(null as any)).toBe(false);
+  });
+});
+
+describe('isM2A', () => {
+  it('returns true only for m2a special', () => {
+    expect(isM2A({ meta: { special: ['m2a'] } } as any)).toBe(true);
+    expect(isM2A({ meta: { special: ['m2o'] } } as any)).toBe(false);
+    expect(isM2A({ meta: { special: ['m2m'] } } as any)).toBe(false);
+  });
+
+  it('returns false for missing/empty/null meta', () => {
+    expect(isM2A({ meta: { special: [] } } as any)).toBe(false);
+    expect(isM2A({ meta: { special: null } } as any)).toBe(false);
+    expect(isM2A({ meta: null } as any)).toBe(false);
+    expect(isM2A(null as any)).toBe(false);
+    expect(isM2A(undefined as any)).toBe(false);
   });
 });
 
@@ -109,6 +128,30 @@ describe('resolveTargetCollection', () => {
     const relations = makeRelationsStore({});
     const fields = makeFieldsStore({});
     const field = { collection: 'parent', field: 'title', meta: { special: [] } } as any;
+    expect(resolveTargetCollection(field, relations as any, fields as any)).toBe(null);
+  });
+
+  it('returns null for M2A (polymorphic target has no single related collection)', () => {
+    // The junction `item` FK is type-erased (foreign_key_table null), so there
+    // is no single target to resolve — heuristics must stay out of M2A.
+    const relations = makeRelationsStore({
+      'orders.treatment': [
+        {
+          collection: 'orders_treatment',
+          field: 'orders_id',
+          related_collection: 'orders',
+          meta: { junction_field: 'item' },
+        },
+      ],
+    });
+    const fields = makeFieldsStore({
+      'orders_treatment.item': { schema: { foreign_key_table: null } },
+    });
+    const field = {
+      collection: 'orders',
+      field: 'treatment',
+      meta: { special: ['m2a'] },
+    } as any;
     expect(resolveTargetCollection(field, relations as any, fields as any)).toBe(null);
   });
 
@@ -230,6 +273,29 @@ describe('pickHeuristic', () => {
     expect(pickHeuristic(field, relations as any, fields as any)).toBe(null);
   });
 
+  it('returns null for M2A fields (polymorphic, no single heuristic target)', () => {
+    const relations = {
+      getRelationsForField: () => [
+        {
+          collection: 'orders_treatment',
+          field: 'orders_id',
+          related_collection: 'orders',
+          meta: { junction_field: 'item' },
+        },
+      ],
+    };
+    const fields = {
+      getField: (_col: string, f: string) =>
+        f === 'item' ? { schema: { foreign_key_table: null } } : null,
+    };
+    const field = {
+      collection: 'orders',
+      field: 'treatment',
+      meta: { special: ['m2a'] },
+    } as any;
+    expect(pickHeuristic(field, relations as any, fields as any)).toBe(null);
+  });
+
   it('returns null for translation fields (existing render path handles them)', () => {
     const relations = {
       getRelationsForField: () => [
@@ -248,5 +314,51 @@ describe('pickHeuristic', () => {
       meta: { special: ['translations'] },
     } as any;
     expect(pickHeuristic(field, relations as any, fields as any)).toBe(null);
+  });
+});
+
+describe('parseM2AToken', () => {
+  it('parses a per-collection token into prefix/collection/path', () => {
+    expect(parseM2AToken('item:partners_catalog.name')).toEqual({
+      prefix: 'item',
+      collection: 'partners_catalog',
+      path: 'name',
+    });
+  });
+
+  it('keeps a nested path intact (M2A -> M2O -> scalar)', () => {
+    expect(parseM2AToken('item:partners_catalog.catalog_id.title')).toEqual({
+      prefix: 'item',
+      collection: 'partners_catalog',
+      path: 'catalog_id.title',
+    });
+  });
+
+  it('returns null for a token without a path (no dot after collection)', () => {
+    expect(parseM2AToken('item:partners_catalog')).toBeNull();
+  });
+
+  it('returns null for a plain token', () => {
+    expect(parseM2AToken('collection')).toBeNull();
+    expect(parseM2AToken('name')).toBeNull();
+  });
+});
+
+describe('buildM2AFieldPath', () => {
+  it('builds the API field path for an M2A per-collection token', () => {
+    expect(buildM2AFieldPath('treatment', 'item', 'partners_catalog', 'name')).toBe(
+      'treatment.item:partners_catalog.name'
+    );
+  });
+
+  it('round-trips with parseM2AToken on the item-relative portion', () => {
+    const built = buildM2AFieldPath('treatment', 'item', 'service', 'name');
+    // strip the "<fieldKey>." prefix to get back the item-relative token
+    const token = built.slice('treatment.'.length);
+    expect(parseM2AToken(token)).toEqual({
+      prefix: 'item',
+      collection: 'service',
+      path: 'name',
+    });
   });
 });

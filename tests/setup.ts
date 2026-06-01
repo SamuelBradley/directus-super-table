@@ -7,6 +7,11 @@ import { config } from '@vue/test-utils';
 vi.mock('@directus/utils', () => ({
   formatTitle: (str: string) => str.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
   isDirectusError: vi.fn(() => false),
+  // Minimal dotted-path getter mirroring @directus/utils `get`.
+  get: (obj: any, path: string) => {
+    if (!path) return undefined;
+    return path.split('.').reduce((acc: any, key: string) => acc?.[key], obj);
+  },
 }));
 
 vi.mock('@directus/format-title', () => ({
