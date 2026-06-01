@@ -1,8 +1,10 @@
 import { get } from '@directus/utils';
-import { parseM2AToken, isM2APrefix } from './displayHeuristics';
-
-/** Conventional M2A token aliases accepted alongside the resolved field names. */
-export const M2A_COLLECTION_TOKEN = 'collection';
+import {
+  parseM2AToken,
+  isM2APrefix,
+  stripM2AFieldPrefix,
+  M2A_COLLECTION_TOKEN,
+} from './displayHeuristics';
 
 /**
  * Render one M2A junction row against a related-values template.
@@ -16,27 +18,41 @@ export function renderM2ATemplate(
   template: string,
   itemField: string,
   discriminator: string,
-  fieldName: string
+  fieldName: string,
+  parentRow?: Record<string, any> | null
 ): string {
   if (!row || typeof row !== 'object') return '—';
   const rowCollection = row[discriminator];
   const item = row[itemField];
 
   return template.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_match, rawToken: string) => {
-    const token = String(rawToken).trim();
+    const raw = String(rawToken).trim();
+    // The native picker prefixes relation tokens with the field key. A prefix
+    // selects the relation scope (junction/item); a bare token reads the parent
+    // row. On a name clash the more specific (deeper) token wins by shape.
+    const hadPrefix = raw.startsWith(`${fieldName}.`);
+    const token = stripM2AFieldPrefix(raw, fieldName);
+
+    // 1. Discriminator (junction level).
     if (token === discriminator || token === M2A_COLLECTION_TOKEN) {
       return rowCollection != null ? String(rowCollection) : '';
     }
 
+    // 2. Per-collection item value (deepest); only the branch matching this
+    //    row's collection contributes a value.
     const parsed = parseM2AToken(token);
-    if (parsed) {
-      if (!isM2APrefix(parsed.prefix, fieldName, itemField)) return '';
-      // Only the branch matching this row's collection contributes a value.
+    if (parsed && isM2APrefix(parsed.prefix, fieldName, itemField)) {
       if (parsed.collection !== rowCollection) return '';
       return scalarOrEmpty(getNestedValue(item, parsed.path));
     }
 
-    return scalarOrEmpty(getNestedValue(item, token));
+    // 3. Other junction-level field (prefixed, e.g. `treatment.sort`).
+    if (hadPrefix) {
+      return scalarOrEmpty(getNestedValue(row, token));
+    }
+
+    // 4. Bare token → parent row field (shallowest).
+    return scalarOrEmpty(getNestedValue(parentRow, token));
   });
 }
 

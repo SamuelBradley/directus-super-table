@@ -271,6 +271,10 @@ describe('expandTokensThroughRelation', () => {
           'partners_catalog.name': { field: 'name' },
           'partners_catalog.catalog_id': { field: 'catalog_id' },
           'service.name': { field: 'name' },
+          // Parent (orders) and junction (orders_treatment) own fields, used to
+          // validate bare parent tokens and field-prefixed junction tokens.
+          'orders.code': { field: 'code' },
+          'orders_treatment.sort': { field: 'sort' },
         },
         {
           'orders.treatment': [
@@ -316,14 +320,32 @@ describe('expandTokensThroughRelation', () => {
       ]);
     });
 
-    it('accepts the picker prefix (field name) as well as item', () => {
+    it('accepts the hand-written `<fieldName>:collection.field` shorthand', () => {
       const { fieldsStore, relationsStore } = m2aStores();
-      // The native display-template picker emits `<fieldName>:collection.field`.
       const result = expandTokensThroughRelation(
         m2aField,
         'treatment',
         'orders',
         ['treatment:partners_catalog.name', 'treatment:service.name'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual([
+        'treatment.collection',
+        'treatment.item:partners_catalog.name',
+        'treatment.item:service.name',
+      ]);
+    });
+
+    it('expands the native picker tokens `<fieldName>.collection` / `<fieldName>.item:col.field`', () => {
+      // What the field-key-prefixed picker actually emits (verified live against
+      // Directus 11.11.0): the parent field key is prepended to every token.
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['treatment.collection', 'treatment.item:partners_catalog.name', 'treatment.item:service.name'],
         fieldsStore as any,
         relationsStore as any
       );
@@ -350,13 +372,13 @@ describe('expandTokensThroughRelation', () => {
       ]);
     });
 
-    it('drops bare tokens so they never 403 against the junction', () => {
+    it('drops bare tokens that match no parent or junction field (no 403)', () => {
       const { fieldsStore, relationsStore } = m2aStores();
       const result = expandTokensThroughRelation(
         m2aField,
         'treatment',
         'orders',
-        ['code', 'time'],
+        ['time', 'unknown_field'],
         fieldsStore as any,
         relationsStore as any
       );
@@ -383,6 +405,58 @@ describe('expandTokensThroughRelation', () => {
         'treatment',
         'orders',
         ['item:service.nonexistent'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual(['treatment.collection']);
+    });
+
+    it('emits a bare parent-level token at the top level (validated against parent)', () => {
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['treatment.collection', 'code'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual(['treatment.collection', 'code']);
+    });
+
+    it('drops a bare token that is not a field on the parent collection', () => {
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['ghost_field'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual(['treatment.collection']);
+    });
+
+    it('emits a field-prefixed junction-level token validated against the junction', () => {
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['treatment.sort'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual(['treatment.collection', 'treatment.sort']);
+    });
+
+    it('drops a field-prefixed token that is not a junction field', () => {
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['treatment.bogus'],
         fieldsStore as any,
         relationsStore as any
       );

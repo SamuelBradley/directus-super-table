@@ -9,6 +9,7 @@ interface RelationsStoreLike {
     field: string
   ) =>
     | Array<{
+        collection?: string;
         field?: string;
         meta?: {
           one_field?: string | null;
@@ -38,6 +39,8 @@ export interface M2ARelation {
   discriminator: string;
   /** Collections the relation may point at; empty when unconstrained. */
   allowedCollections: string[];
+  /** The junction collection itself (e.g. `orders_treatment`), or null if unknown. */
+  junctionCollection: string | null;
 }
 
 /** Default discriminator column name used by Directus M2A junctions. */
@@ -84,6 +87,7 @@ export function resolveM2ARelation(
       itemField: itemRel.field,
       discriminator: itemRel.meta.one_collection_field,
       allowedCollections: itemRel.meta.one_allowed_collections ?? [],
+      junctionCollection: itemRel.collection ?? null,
     };
   }
 
@@ -99,6 +103,7 @@ export function resolveM2ARelation(
     itemField,
     discriminator: DEFAULT_DISCRIMINATOR,
     allowedCollections,
+    junctionCollection: parentRel?.collection ?? null,
   };
 }
 

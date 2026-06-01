@@ -8,6 +8,7 @@ import {
   parseM2AToken,
   buildM2AFieldPath,
   isM2APrefix,
+  stripM2AFieldPrefix,
 } from '@/utils/displayHeuristics';
 
 describe('isRelational', () => {
@@ -365,7 +366,7 @@ describe('buildM2AFieldPath', () => {
 });
 
 describe('isM2APrefix', () => {
-  it('accepts the parent field name (picker output)', () => {
+  it('accepts the parent field name (hand-written shorthand)', () => {
     expect(isM2APrefix('treatment', 'treatment', 'item')).toBe(true);
   });
 
@@ -376,5 +377,34 @@ describe('isM2APrefix', () => {
 
   it('rejects an unrelated prefix', () => {
     expect(isM2APrefix('something', 'treatment', 'item')).toBe(false);
+  });
+});
+
+describe('stripM2AFieldPrefix', () => {
+  it('strips the field-key prefix the native picker prepends', () => {
+    expect(stripM2AFieldPrefix('treatment.collection', 'treatment')).toBe('collection');
+    expect(stripM2AFieldPrefix('treatment.item:service.name', 'treatment')).toBe(
+      'item:service.name'
+    );
+  });
+
+  it('leaves an already field-relative token unchanged', () => {
+    expect(stripM2AFieldPrefix('collection', 'treatment')).toBe('collection');
+    expect(stripM2AFieldPrefix('item:service.name', 'treatment')).toBe('item:service.name');
+  });
+
+  it('does not strip the `<field>:` colon shorthand (no dot prefix)', () => {
+    expect(stripM2AFieldPrefix('treatment:service.name', 'treatment')).toBe(
+      'treatment:service.name'
+    );
+  });
+
+  it('only strips its own field key, not a same-named target collection', () => {
+    // A token addressing a collection literally named `treatment` must survive.
+    expect(stripM2AFieldPrefix('item:treatment.name', 'treatment')).toBe('item:treatment.name');
+  });
+
+  it('returns the token unchanged when no field name is given', () => {
+    expect(stripM2AFieldPrefix('treatment.collection', '')).toBe('treatment.collection');
   });
 });

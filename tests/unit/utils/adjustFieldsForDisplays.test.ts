@@ -262,6 +262,7 @@ describe('adjustFieldsForDisplays — M2A (issue #60)', () => {
             if (col === 'partners_catalog' && (f === 'name' || f === 'catalog_id'))
               return { field: f };
             if (col === 'service' && f === 'name') return { field: 'name' };
+            if (col === 'orders' && f === 'code') return { field: 'code' };
             return null;
           },
           getFieldsForCollection: () => [],
@@ -307,13 +308,15 @@ describe('adjustFieldsForDisplays — M2A (issue #60)', () => {
     );
   });
 
-  it('never emits an invalid bare M2A path from a column-display override', async () => {
+  it('emits a bare parent token at the top level, never prefixed under the junction', async () => {
     mockM2A();
     const { adjustFieldsForDisplays } = await import('@/utils/adjustFieldsForDisplays');
-    const result = adjustFieldsForDisplays(['code', 'treatment'], 'orders', {
+    const result = adjustFieldsForDisplays(['treatment'], 'orders', {
       treatment: { template: '{{code}}' },
     });
-    // The bare token must be dropped — these paths would 403 against the junction.
+    // `code` is a parent field: fetched at the top level, never prefixed under
+    // the junction (which would 403). The discriminator is always emitted.
+    expect(result).toContain('code');
     expect(result).not.toContain('treatment.code');
     expect(result).not.toContain('treatment.item');
     expect(result).not.toContain('treatment.id');
