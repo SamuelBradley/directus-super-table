@@ -5,6 +5,24 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.6.0 — Deep relational paths in M2A templates (nested translations)
+
+### Added
+- **M2A templates resolve deep relational paths**, including a `translations`
+  relation stored *inside* the target collection — e.g.
+  `{{item:service.translations.label}}` (M2A → target → translations → value).
+  Resolution is generic and schema-driven: each hop is interpreted via the
+  relations store, so it scales to arbitrary depth (M2O chains, files, nested
+  translations) without per-level special-casing.
+- **Per-relation language-field detection.** The translation language column is
+  read from the relation (its `junction_field`), not hardcoded — so collections
+  using a non-default language field still resolve.
+- **Language selection for nested translations.** An optional `:lang` suffix on
+  the token (`…translations.label:de-DE`) picks the language; without it the
+  current user's language is used, falling back to the first available row.
+
+Requested by @Abdallah-Awwad as a follow-up to #60.
+
 ## v0.5.1 — M2A picker templates, field scopes & guard fix (Issue #60)
 
 ### Fixed
