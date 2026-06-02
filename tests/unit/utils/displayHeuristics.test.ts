@@ -9,6 +9,7 @@ import {
   buildM2AFieldPath,
   isM2APrefix,
   stripM2AFieldPrefix,
+  splitLanguageSuffix,
 } from '@/utils/displayHeuristics';
 
 describe('isRelational', () => {
@@ -406,5 +407,22 @@ describe('stripM2AFieldPrefix', () => {
 
   it('returns the token unchanged when no field name is given', () => {
     expect(stripM2AFieldPrefix('treatment.collection', '')).toBe('treatment.collection');
+  });
+});
+
+describe('splitLanguageSuffix', () => {
+  it('splits a trailing :language off the path', () => {
+    expect(splitLanguageSuffix('translations.label:de-DE')).toEqual({
+      path: 'translations.label',
+      language: 'de-DE',
+    });
+  });
+
+  it('returns language null when there is no suffix', () => {
+    expect(splitLanguageSuffix('catalog_id.title')).toEqual({
+      path: 'catalog_id.title',
+      language: null,
+    });
+    expect(splitLanguageSuffix('name')).toEqual({ path: 'name', language: null });
   });
 });

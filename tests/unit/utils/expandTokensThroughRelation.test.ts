@@ -271,6 +271,7 @@ describe('expandTokensThroughRelation', () => {
           'partners_catalog.name': { field: 'name' },
           'partners_catalog.catalog_id': { field: 'catalog_id' },
           'service.name': { field: 'name' },
+          'service.translations': { field: 'translations' },
           // Parent (orders) and junction (orders_treatment) own fields, used to
           // validate bare parent tokens and field-prefixed junction tokens.
           'orders.code': { field: 'code' },
@@ -461,6 +462,20 @@ describe('expandTokensThroughRelation', () => {
         relationsStore as any
       );
       expect(result).toEqual(['treatment.collection']);
+    });
+
+    it('strips the :lang suffix from a nested translation token for the API path', () => {
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['treatment.item:service.translations.label:de-DE'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      // The :de-DE is dropped — Directus field paths must not carry it.
+      expect(result).toEqual(['treatment.collection', 'treatment.item:service.translations.label']);
     });
 
     it('returns [] when the M2A item relation is missing (defensive)', () => {

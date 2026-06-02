@@ -1,4 +1,4 @@
-import { renderM2ATemplate } from './renderM2ATemplate';
+import { renderM2ATemplate, type RenderM2AOptions } from './renderM2ATemplate';
 
 /**
  * One rendered M2A junction row: either resolved template text, or a `block`
@@ -30,7 +30,8 @@ export function buildM2ASegments(
   discriminator: string,
   fieldName: string,
   parentRow: Record<string, any> | null | undefined,
-  canRead: (collection: string) => boolean
+  canRead: (collection: string) => boolean,
+  renderOpts?: RenderM2AOptions
 ): M2ASegment[] {
   if (!Array.isArray(rows) || rows.length === 0) return [];
 
@@ -52,7 +53,8 @@ export function buildM2ASegments(
       itemField,
       discriminator,
       fieldName,
-      parentRow
+      parentRow,
+      renderOpts
     ).trim();
     if (text && text !== '—') segments.push({ text });
   }
