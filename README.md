@@ -177,6 +177,10 @@ name clash the most specific (deepest) match wins:
   column like `{{treatment.sort}}`
 - `{{<parentField>}}` — a bare token reads a field on the parent row, e.g.
   `{{code}}` shows the order's own code next to each item
+- **Deep paths through the target work too**, including a `translations`
+  relation stored inside the target: `{{item:service.translations.label}}`.
+  Add a `:lang` suffix to choose the language (`…translations.label:de-DE`);
+  without it the current user's language is used.
 
 Each junction row only resolves the item token whose `<collection>` matches its own
 target, so a template can cover every allowed collection at once:
