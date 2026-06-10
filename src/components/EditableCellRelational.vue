@@ -145,7 +145,9 @@
     :style="{ textAlign: props.align || 'left' }"
   >
     <!-- Direct Display Value (already rendered in computed) -->
-    <span class="template-display">{{ displayValue }}</span>
+    <span class="template-display">
+      {{ field?.display === 'user' ? formatUserDisplay(displayValue) : displayValue }}
+    </span>
   </div>
 
   <!-- FALLBACK: Display only for relational fields without display templates -->
@@ -276,6 +278,33 @@ const displayValue = computed(() => {
     // No translations available at all
     return null;
   }
+
+    if (props.field?.display === 'user') {
+      const rawValue = props.item[props.fieldKey];
+
+      if (rawValue && typeof rawValue === 'object') {
+        return rawValue;
+      }
+
+      if (props.getDisplayValue) {
+        const aliasedValue = props.getDisplayValue(props.item, props.fieldKey);
+
+        if (aliasedValue && typeof aliasedValue === 'object') {
+          return aliasedValue;
+        }
+
+        if (aliasedValue != null) {
+          return aliasedValue;
+        }
+      }
+
+      const cachedValue = relationalCache.value[props.fieldKey];
+      if (cachedValue) {
+        return cachedValue;
+      }
+
+      return rawValue ?? null;
+    }
 
   // Handle relational fields with display templates
   const template =

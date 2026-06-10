@@ -34,7 +34,9 @@ type UsableAliasFields = {
  */
 export function useAliasFields(
   fields: Ref<string[]> | string[],
-  collection: Ref<string | null> | string | null
+  collection: Ref<string | null> | string | null,
+  fieldsStore?: any,
+  relationsStore?: any
 ): UsableAliasFields {
   const aliasedFields = computed(() => {
     const aliasedFields: Record<string, AliasFields> = {};
@@ -70,7 +72,7 @@ export function useAliasFields(
         aliasedFields[field] = {
           key: field,
           fieldName,
-          fields: adjustFieldsForDisplays([field], _collection),
+          fields: adjustFieldsForDisplays([field], _collection, fieldsStore, relationsStore),
           aliased: false,
         };
       } else {
@@ -79,7 +81,7 @@ export function useAliasFields(
         aliasedFields[field] = {
           key: field,
           fieldName,
-          fields: adjustFieldsForDisplays([field], _collection),
+          fields: adjustFieldsForDisplays([field], _collection, fieldsStore, relationsStore),
           aliased: false,
         };
       }

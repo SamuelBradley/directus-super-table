@@ -287,6 +287,7 @@ import { useTableEdits } from './composables/useTableEdits';
 import { useTablePagination } from './composables/useTablePagination';
 import { useTableFields } from './composables/useTableFields';
 import { useFilterPresets } from './composables/useFilterPresets';
+import { adjustFieldsForDisplays } from './utils/adjustFieldsForDisplays';
 import {
   useTranslationConfig,
   getTranslationLanguageFieldPath,
@@ -339,7 +340,12 @@ const layoutQuery = useSync(props, 'layoutQuery', emit);
 
 // Collection info
 const { collection, filter, search, readonly } = toRefs(props);
-const { primaryKeyField, fields: fieldsInCollection, sortField } = useCollection(collection.value);
+const collectionKey = computed<string | null>(() => collection.value ?? null) as unknown as Ref<
+  string | null
+>;
+const { primaryKeyField, fields: fieldsInCollection, sortField } = useCollection(
+  collectionKey as any
+);
 
 // Helper to get primary key field name with proper typing
 const getPrimaryKeyFieldName = () => {
@@ -443,6 +449,15 @@ const fieldsDefaultValue = computed(() => {
     .sort();
 });
 
+const collectionSchemaSignature = computed(() => {
+  return fieldsInCollection.value
+    .map(
+      (field: Field) =>
+        `${field.field}:${field.meta?.display ?? ''}:${field.meta?.interface ?? ''}:${field.meta?.special?.join(',') ?? ''}`
+    )
+    .join('|');
+});
+
 const fields = computed({
   get() {
     if (layoutQuery.value?.fields) {
@@ -467,18 +482,22 @@ const fieldsForAliasing = computed(() => {
 });
 
 // Use alias fields for proper relational data handling
-const { aliasedFields, aliasQuery, getFromAliasedItem } = useAliasFields(
+const { aliasQuery, getFromAliasedItem } = useAliasFields(
   fieldsForAliasing,
-  collection
+  collection,
+  fieldsStore,
+  relationsStore
 );
 
 // Create fields for API query using the aliased fields (following original Directus pattern)
 const fieldsWithRelational = computed(() => {
   if (!props.collection) return [];
 
-  // Extract all fields from aliasedFields (this includes display-adjusted fields)
-  const allDisplayFields = Object.values(aliasedFields.value).flatMap((aliasInfo) => {
-    return aliasInfo.fields || [aliasInfo.key];
+  // Rebuild display field expansion when collection schema/display metadata updates.
+  collectionSchemaSignature.value;
+
+  const allDisplayFields = fieldsForAliasing.value.flatMap((field: string) => {
+    return adjustFieldsForDisplays([field], collection.value, fieldsStore, relationsStore);
   });
 
   // Remove duplicates
@@ -618,7 +637,11 @@ const tableHeaders = computed(() => {
       align: layoutOptions.value?.align?.[field.key] || 'left',
       field: {
         ...field,
-        display: field.meta?.display || getDefaultDisplayForType(field.type),
+        display:
+          field.meta?.display ||
+          (['user_created', 'user_updated'].includes(field.field)
+            ? 'user'
+            : getDefaultDisplayForType(field.type)),
         displayOptions: field.meta?.display_options,
         interface: field.meta?.interface,
         interfaceOptions: field.meta?.options,
@@ -873,6 +896,9 @@ const searchFilter = computed(() => {
 const deep = computed(() => {
   const deepFields: Record<string, any> = {};
 
+  // Rebuild relation deep queries when the active collection schema updates.
+  collectionSchemaSignature.value;
+
   fields.value.forEach((field: string) => {
     // Remove language suffix if present
     const actualField = field.includes(':') ? field.split(':')[0] : field;
@@ -1062,7 +1088,7 @@ watch(
 
 // Watch for query parameter changes
 watch(
-  [combinedFilter, sort, page, limit, fieldsWithRelational],
+  [collection, combinedFilter, sort, page, limit, fieldsWithRelational, deep],
   () => {
     // Don't refetch during manual sorting
     if (!isManualSorting) {
@@ -1127,7 +1153,7 @@ const {
   getBaseFieldKey,
 } = useTableFields(
   fields as Ref<string[]>,
-  ref(fieldsInCollection.value),
+  fieldsInCollection as unknown as Ref<Field[]>,
   collection,
   fieldsStore,
   relationsStore,

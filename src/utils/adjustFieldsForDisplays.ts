@@ -38,6 +38,33 @@ function isNativeDirectusCollection(collectionName: string | null): boolean {
   return collectionName?.startsWith('directus_') ?? false;
 }
 
+function isSystemUserAuditField(field: any, fieldKey: string): boolean {
+  const rootField = fieldKey.split('.')[0];
+  const fieldName = field?.field || rootField;
+  return fieldName === 'user_created' || fieldName === 'user_updated';
+}
+
+function getUserDisplayFields(fieldKey: string, fieldsStore: any): string[] {
+  const userPkField = getPrimaryKeyForCollection('directus_users');
+  const displayFields = [
+    `${fieldKey}.${userPkField}`,
+    `${fieldKey}.email`,
+    `${fieldKey}.first_name`,
+    `${fieldKey}.last_name`,
+  ];
+
+  if (fieldExists('directus_users', 'avatar', fieldsStore)) {
+    const avatarPkField = getPrimaryKeyForCollection('directus_files');
+    displayFields.push(`${fieldKey}.avatar.${avatarPkField}`);
+
+    if (fieldExists('directus_files', 'modified_on', fieldsStore)) {
+      displayFields.push(`${fieldKey}.avatar.modified_on`);
+    }
+  }
+
+  return displayFields;
+}
+
 /**
  * Get the primary key field name for a collection
  * Falls back to 'id' if collection is not found or primary key cannot be determined
@@ -128,18 +155,23 @@ function getDisplayFieldsForRelation(
  */
 export function adjustFieldsForDisplays(
   fields: readonly string[],
-  parentCollection: string
+  parentCollection: string,
+  providedFieldsStore?: any,
+  providedRelationsStore?: any
 ): string[] {
   // Get the stores, but handle the case where they're not available
-  let fieldsStore: any = null;
-  let relationsStore: any = null;
-  try {
-    const { useFieldsStore, useRelationsStore } = useStores();
-    fieldsStore = useFieldsStore();
-    relationsStore = useRelationsStore();
-  } catch {
-    // Stores not available, return original fields
-    return [...fields];
+  let fieldsStore: any = providedFieldsStore ?? null;
+  let relationsStore: any = providedRelationsStore ?? null;
+
+  if (!fieldsStore || !relationsStore) {
+    try {
+      const { useFieldsStore, useRelationsStore } = useStores();
+      fieldsStore = fieldsStore ?? useFieldsStore();
+      relationsStore = relationsStore ?? useRelationsStore();
+    } catch {
+      // Stores not available, return original fields
+      return [...fields];
+    }
   }
 
   if (!fieldsStore) return [...fields];
@@ -148,11 +180,17 @@ export function adjustFieldsForDisplays(
     .map((fieldKey) => {
       const field = fieldsStore.getField(parentCollection, fieldKey);
 
-      if (!field) return fieldKey;
+      if (!field) {
+        if (isSystemUserAuditField(null, fieldKey)) {
+          return getUserDisplayFields(fieldKey, fieldsStore);
+        }
+
+        return fieldKey;
+      }
       if (field.meta?.display === null) return fieldKey;
 
       // Get the display definition - this is where the magic happens!
-      const displayId = field.meta?.display;
+      const displayId = field.meta?.display || (isSystemUserAuditField(field, fieldKey) ? 'user' : null);
       if (!displayId) return fieldKey;
 
       // Get display-specific fields based on display type
@@ -201,26 +239,7 @@ export function adjustFieldsForDisplays(
             break;
           }
           case 'user': {
-            // User display needs these specific fields
-            // directus_users has standard schema, but validate avatar field
-            const userPkField = getPrimaryKeyForCollection('directus_users');
-            displayFields = [
-              `${fieldKey}.${userPkField}`,
-              `${fieldKey}.email`,
-              `${fieldKey}.first_name`,
-              `${fieldKey}.last_name`,
-            ];
-
-            // Only add avatar if it exists
-            if (fieldExists('directus_users', 'avatar', fieldsStore)) {
-              // Avatar references directus_files
-              const avatarPkField = getPrimaryKeyForCollection('directus_files');
-              displayFields.push(`${fieldKey}.avatar.${avatarPkField}`);
-
-              if (fieldExists('directus_files', 'modified_on', fieldsStore)) {
-                displayFields.push(`${fieldKey}.avatar.modified_on`);
-              }
-            }
+            displayFields = getUserDisplayFields(fieldKey, fieldsStore);
             break;
           }
           default: {
@@ -280,5 +299,5 @@ function extractFieldsFromTemplate(template: string): string[] {
   return fieldMatches
     .map((match) => match.replace(/\{\{|\}\}/g, '').trim())
     .filter((field) => field && !field.includes('(') && !field.includes(')'))
-    .map((field) => field.split('.').pop() || field); // Get the last part for nested fields
+    .map((field) => field.replace(/^\$+/, ''));
 }

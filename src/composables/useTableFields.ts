@@ -1,11 +1,11 @@
-import { ref, Ref } from 'vue';
+import { ref, Ref, ComputedRef } from 'vue';
 import type { Field } from '@directus/types';
 import { useExistingLanguageDetection } from './useExistingLanguageDetection';
 import type { Language } from '../types/table.types';
 
 export function useTableFields(
   fields: Ref<string[]>,
-  fieldsInCollection: Ref<Field[]>,
+  fieldsInCollection: Ref<Field[]> | ComputedRef<Field[]>,
   collection: Ref<string>,
   fieldsStore: any,
   relationsStore: any,
