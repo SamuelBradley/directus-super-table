@@ -21,6 +21,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the token (`…translations.label:de-DE`) picks the language; without it the
   current user's language is used, falling back to the first available row.
 
+### Fixed
+- **Invalid deep template fields no longer blank the view.** Every segment of
+  an `item:collection.path` token is now validated against the schema before
+  the request is built; unknown fields are dropped with a `console.warn`
+  (`[super-layout-table] Dropped template field …`) and the cell degrades to
+  an empty value — previously the API rejected the whole request (403) and the
+  table rendered zero rows with no hint.
+- **HTML translation values render as plain text in M2A cells.** Resolved
+  template values are stripped of HTML tags (entities decoded, script/style
+  contents dropped), matching the native `formatted-value` display used by
+  regular columns; raw `<p data-start=…>` markup is no longer shown.
+- **Nested to-many relations inside M2A items are fetched unbounded.** The
+  items request now emits `deep[<field>][item:<collection>][<relation>][_limit]=-1`
+  for every to-many hop crossed by an expanded template path, so e.g. a
+  translations set larger than the server's default page size (100) is no
+  longer silently truncated.
+
 Requested by @Abdallah-Awwad as a follow-up to #60.
 
 ## v0.5.1 — M2A picker templates, field scopes & guard fix (Issue #60)
