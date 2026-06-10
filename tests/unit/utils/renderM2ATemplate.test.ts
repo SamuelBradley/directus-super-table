@@ -315,4 +315,51 @@ describe('renderM2ATemplate', () => {
       ).toBe('');
     });
   });
+
+  describe('HTML stripping of resolved values', () => {
+    it('strips HTML tags from item field values', () => {
+      const row = {
+        collection: 'content_headline',
+        item: { description: '<p data-start="258">Seamless connection</p>' },
+      };
+      expect(
+        renderM2ATemplate(
+          row,
+          '{{item:content_headline.description}}',
+          itemField,
+          discriminator,
+          fieldName
+        )
+      ).toBe('Seamless connection');
+    });
+
+    it('decodes entities in resolved values', () => {
+      const row = { collection: 'service', item: { name: 'Fix &amp; Flip' } };
+      expect(
+        renderM2ATemplate(row, '{{item:service.name}}', itemField, discriminator, fieldName)
+      ).toBe('Fix & Flip');
+    });
+
+    it('strips HTML from junction-level and parent-row tokens too', () => {
+      const row = { collection: 'service', item: {}, note: '<b>urgent</b>' };
+      const parentRow = { context: '<em>Q3</em>' };
+      expect(
+        renderM2ATemplate(
+          row,
+          '{{treatment.note}} {{context}}',
+          itemField,
+          discriminator,
+          fieldName,
+          parentRow
+        )
+      ).toBe('urgent Q3');
+    });
+
+    it('leaves plain text values untouched', () => {
+      const row = { collection: 'service', item: { name: 'Installation (DE)' } };
+      expect(
+        renderM2ATemplate(row, '{{item:service.name}}', itemField, discriminator, fieldName)
+      ).toBe('Installation (DE)');
+    });
+  });
 });

@@ -7,6 +7,7 @@ import {
   M2A_COLLECTION_TOKEN,
 } from './displayHeuristics';
 import { resolveRelationalPath, type DescribeHop } from './resolveRelationalPath';
+import { stripHtml } from './stripHtml';
 
 export interface RenderM2AOptions {
   /** Schema-aware hop resolver; enables deep relational paths (e.g. nested translations). */
@@ -85,7 +86,8 @@ function getNestedValue(source: any, path: string): any {
   return get(source, cleaned);
 }
 
-/** Tokens render scalars only; objects/arrays collapse to '' to avoid "[object Object]". */
+/** Tokens render scalars only; objects/arrays collapse to '' to avoid "[object Object]".
+ *  HTML is stripped so rich-text values match the native formatted-value display. */
 function scalarOrEmpty(value: any): string {
-  return value != null && typeof value !== 'object' ? String(value) : '';
+  return value != null && typeof value !== 'object' ? stripHtml(value) : '';
 }
