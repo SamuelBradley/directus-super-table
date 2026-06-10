@@ -131,6 +131,9 @@ export function useAliasFields(
     const aliasInfo = Object.values(aliasedFields.value).find((field) => field.key === key);
 
     // Skip any nested fields prefixed with $ as they dont exist. ($thumbnail as an example)
+    // NOTE: deliberately NOT splitPathSegments (resolveRelationalPath.ts) — this
+    // normalizes a lookup key for `get(item, key)` (no trim, empty segments kept,
+    // string result), it does not tokenize a schema walk.
     key = key.includes('.')
       ? key
           .split('.')

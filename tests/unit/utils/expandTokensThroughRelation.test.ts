@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { expandTokensThroughRelation } from '@/utils/adjustFieldsForDisplays';
+import { __resetWarnOnce } from '@/utils/warnOnce';
 
 const makeStores = (
   fieldsByPath: Record<string, any>,
@@ -14,6 +15,12 @@ const makeStores = (
 });
 
 describe('expandTokensThroughRelation', () => {
+  // warnOnce dedupes per module instance; this file imports the module
+  // statically, so reset the cache to keep every test order-independent.
+  beforeEach(() => {
+    __resetWarnOnce();
+  });
+
   it('returns fieldKey.token for plain M2O when target field exists', () => {
     const { fieldsStore, relationsStore } = makeStores(
       { 'directus_users.first_name': { field: 'first_name' } },
@@ -136,7 +143,8 @@ describe('expandTokensThroughRelation', () => {
           field: 'tag_id',
           schema: { foreign_key_table: 'tags' },
         },
-        'tags.category': { field: 'category' },
+        'tags.category': { field: 'category', meta: { special: ['m2o'] } },
+        'categories.name': { field: 'name' },
       },
       {
         'products.product_tags': [
@@ -146,6 +154,9 @@ describe('expandTokensThroughRelation', () => {
             related_collection: 'products',
             meta: { junction_field: 'tag_id' },
           },
+        ],
+        'tags.category': [
+          { collection: 'tags', field: 'category', related_collection: 'categories' },
         ],
       }
     );
@@ -281,6 +292,11 @@ describe('expandTokensThroughRelation', () => {
           // validate bare parent tokens and field-prefixed junction tokens.
           'orders.code': { field: 'code' },
           'orders_treatment.sort': { field: 'sort' },
+          // Junction- and parent-level M2O hops for deep junction/parent tokens.
+          'orders_treatment.added_by': { field: 'added_by', meta: { special: ['m2o'] } },
+          'directus_users.email': { field: 'email' },
+          'orders.customer': { field: 'customer', meta: { special: ['m2o'] } },
+          'customers.email': { field: 'email' },
         },
         {
           'orders.treatment': [
@@ -311,6 +327,16 @@ describe('expandTokensThroughRelation', () => {
               related_collection: 'service',
               meta: { one_field: 'translations', junction_field: 'languages_code' },
             },
+          ],
+          'orders_treatment.added_by': [
+            {
+              collection: 'orders_treatment',
+              field: 'added_by',
+              related_collection: 'directus_users',
+            },
+          ],
+          'orders.customer': [
+            { collection: 'orders', field: 'customer', related_collection: 'customers' },
           ],
         }
       );
@@ -628,5 +654,247 @@ describe('expandTokensThroughRelation', () => {
       expect(warnSpy).not.toHaveBeenCalled();
       warnSpy.mockRestore();
     });
+
+    it('emits a deep junction token when every segment exists (M2A junction)', () => {
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['treatment.added_by.email'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual(['treatment.collection', 'treatment.added_by.email']);
+    });
+
+    it('drops a deep junction token whose leaf is missing, with a warning', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['treatment.added_by.ghost'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual(['treatment.collection']);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('directus_users.ghost'));
+      warnSpy.mockRestore();
+    });
+
+    it('emits a deep parent token when every segment exists (M2A parent)', () => {
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['customer.email'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual(['treatment.collection', 'customer.email']);
+    });
+
+    it('drops a deep parent token whose middle segment is scalar, with a warning', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['code.deeper'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual(['treatment.collection']);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('orders.code'));
+      warnSpy.mockRestore();
+    });
+
+    it('warns only once for the same dropped token across recomputes (warnOnce)', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { fieldsStore, relationsStore } = m2aStores();
+      for (let i = 0; i < 3; i++) {
+        expandTokensThroughRelation(
+          m2aField,
+          'treatment',
+          'orders',
+          ['item:service.nonexistent'],
+          fieldsStore as any,
+          relationsStore as any
+        );
+      }
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      warnSpy.mockRestore();
+    });
+  });
+
+  it('keeps a valid deep M2M token without warning (per-segment walk)', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { fieldsStore, relationsStore } = makeStores(
+      {
+        'products_tags.tag_id': { field: 'tag_id', schema: { foreign_key_table: 'tags' } },
+        'tags.category': { field: 'category', meta: { special: ['m2o'] } },
+        'categories.name': { field: 'name' },
+      },
+      {
+        'products.product_tags': [
+          {
+            collection: 'products_tags',
+            field: 'product_id',
+            related_collection: 'products',
+            meta: { junction_field: 'tag_id' },
+          },
+        ],
+        'tags.category': [
+          { collection: 'tags', field: 'category', related_collection: 'categories' },
+        ],
+      }
+    );
+    const field = {
+      collection: 'products',
+      field: 'product_tags',
+      meta: { special: ['m2m'] },
+    } as any;
+    const result = expandTokensThroughRelation(
+      field,
+      'product_tags',
+      'products',
+      ['category.name'],
+      fieldsStore as any,
+      relationsStore as any
+    );
+    expect(result).toEqual(['product_tags.tag_id.category.name']);
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('drops a deep M2M token whose leaf is missing on the deep target, with a warning', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { fieldsStore, relationsStore } = makeStores(
+      {
+        'products_tags.tag_id': { field: 'tag_id', schema: { foreign_key_table: 'tags' } },
+        'tags.category': { field: 'category', meta: { special: ['m2o'] } },
+        'categories.name': { field: 'name' },
+      },
+      {
+        'products.product_tags': [
+          {
+            collection: 'products_tags',
+            field: 'product_id',
+            related_collection: 'products',
+            meta: { junction_field: 'tag_id' },
+          },
+        ],
+        'tags.category': [
+          { collection: 'tags', field: 'category', related_collection: 'categories' },
+        ],
+      }
+    );
+    const field = {
+      collection: 'products',
+      field: 'product_tags',
+      meta: { special: ['m2m'] },
+    } as any;
+    const result = expandTokensThroughRelation(
+      field,
+      'product_tags',
+      'products',
+      ['category.ghost'],
+      fieldsStore as any,
+      relationsStore as any
+    );
+    expect(result).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('categories.ghost'));
+    warnSpy.mockRestore();
+  });
+
+  it('keeps a deep M2M token across a files hop — permissive, no warn', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { fieldsStore, relationsStore } = makeStores(
+      {
+        'products_tags.tag_id': { field: 'tag_id', schema: { foreign_key_table: 'tags' } },
+        'tags.attachments': { field: 'attachments', meta: { special: ['files'] } },
+      },
+      {
+        'products.product_tags': [
+          {
+            collection: 'products_tags',
+            field: 'product_id',
+            related_collection: 'products',
+            meta: { junction_field: 'tag_id' },
+          },
+        ],
+      }
+    );
+    const field = {
+      collection: 'products',
+      field: 'product_tags',
+      meta: { special: ['m2m'] },
+    } as any;
+    const result = expandTokensThroughRelation(
+      field,
+      'product_tags',
+      'products',
+      ['attachments.directus_files_id.title'],
+      fieldsStore as any,
+      relationsStore as any
+    );
+    expect(result).toEqual(['product_tags.tag_id.attachments.directus_files_id.title']);
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('keeps a valid deep M2O token after walking each segment (role.name)', () => {
+    const { fieldsStore, relationsStore } = makeStores(
+      {
+        'directus_users.role': { field: 'role', meta: { special: ['m2o'] } },
+        'directus_roles.name': { field: 'name' },
+      },
+      {
+        'parent.author': [
+          { collection: 'parent', field: 'author', related_collection: 'directus_users' },
+        ],
+        'directus_users.role': [
+          { collection: 'directus_users', field: 'role', related_collection: 'directus_roles' },
+        ],
+      }
+    );
+    const field = { collection: 'parent', field: 'author', meta: { special: ['m2o'] } } as any;
+    const result = expandTokensThroughRelation(
+      field,
+      'author',
+      'parent',
+      ['role.name'],
+      fieldsStore as any,
+      relationsStore as any
+    );
+    expect(result).toEqual(['author.role.name']);
+  });
+
+  it('drops a deep M2O token whose middle segment is scalar, with a warning', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { fieldsStore, relationsStore } = makeStores(
+      { 'directus_users.first_name': { field: 'first_name' } },
+      {
+        'parent.author': [
+          { collection: 'parent', field: 'author', related_collection: 'directus_users' },
+        ],
+      }
+    );
+    const field = { collection: 'parent', field: 'author', meta: { special: ['m2o'] } } as any;
+    const result = expandTokensThroughRelation(
+      field,
+      'author',
+      'parent',
+      ['first_name.deeper'],
+      fieldsStore as any,
+      relationsStore as any
+    );
+    expect(result).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('directus_users.first_name'));
+    warnSpy.mockRestore();
   });
 });

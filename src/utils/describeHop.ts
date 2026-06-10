@@ -36,6 +36,11 @@ export function createDescribeHop(
       relations = relationsStore.getRelationsForField(collection, field) ?? [];
     } catch {
       // Stores can throw during unloaded states (early app boot).
+      // Mapped to 'scalar' deliberately: the renderer treats scalar/unknown
+      // identically (read & stop). Caveat: validateDeepPath rejects a
+      // mid-path 'scalar', so a relations-store-only throw can drop a valid
+      // path until stores hydrate (documented there). Pinned by
+      // describeHop.test.ts ('store throwing → scalar').
       return { kind: 'scalar' };
     }
 

@@ -1,4 +1,4 @@
-import type { DescribeHop } from './resolveRelationalPath';
+import { splitPathSegments, type DescribeHop } from './resolveRelationalPath';
 
 /** Hop kinds whose value is an array the server pages with its default limit. */
 const TO_MANY_KINDS = new Set(['o2m', 'm2m', 'm2a', 'files', 'translations']);
@@ -33,10 +33,7 @@ export function buildNestedM2ADeep(
     if (!match) continue;
     const fieldKey = match[1]!;
     const itemScope = `${match[2]!}:${match[3]!}`;
-    const segments = match[4]!
-      .split('.')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0 && !s.startsWith('$'));
+    const segments = splitPathSegments(match[4]!);
 
     let collection: string | null = match[3]!;
     for (let i = 0; i < segments.length && collection; i++) {

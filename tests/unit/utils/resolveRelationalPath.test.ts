@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   resolveRelationalPath,
   collectTranslationLanguagePaths,
+  splitPathSegments,
   type HopInfo,
 } from '@/utils/resolveRelationalPath';
 
@@ -145,5 +146,32 @@ describe('collectTranslationLanguagePaths', () => {
       collectTranslationLanguagePaths('catalog_id.title', 'partners_catalog', describeHop)
     ).toEqual([]);
     expect(collectTranslationLanguagePaths('name', 'service', describeHop)).toEqual([]);
+  });
+});
+
+describe('splitPathSegments', () => {
+  it('splits a dotted path into segments', () => {
+    expect(splitPathSegments('translations.label')).toEqual(['translations', 'label']);
+  });
+
+  it('returns a single-segment array for a plain field', () => {
+    expect(splitPathSegments('name')).toEqual(['name']);
+  });
+
+  it('trims whitespace around segments', () => {
+    expect(splitPathSegments(' a . b ')).toEqual(['a', 'b']);
+  });
+
+  it('drops empty segments (leading/trailing/double dots)', () => {
+    expect(splitPathSegments('.a..b.')).toEqual(['a', 'b']);
+  });
+
+  it('drops $-virtual segments like $thumbnail', () => {
+    expect(splitPathSegments('image.$thumbnail.title')).toEqual(['image', 'title']);
+  });
+
+  it('returns [] for an empty or all-virtual path', () => {
+    expect(splitPathSegments('')).toEqual([]);
+    expect(splitPathSegments('$thumbnail')).toEqual([]);
   });
 });

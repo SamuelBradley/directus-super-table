@@ -32,6 +32,20 @@ const TO_ONE = new Set<HopKind>(['m2o', 'file']);
 /** Hop kinds whose value is a to-many array with no single-cell representation. */
 const TO_MANY = new Set<HopKind>(['o2m', 'm2m', 'm2a', 'files']);
 
+/**
+ * Split a dotted relational path into walkable segments: trims whitespace,
+ * drops empty segments and Directus virtual segments (e.g. `$thumbnail`).
+ * Canonical splitter for every schema walk — query building, validation and
+ * rendering must tokenize identically, or a path could validate differently
+ * than it resolves.
+ */
+export function splitPathSegments(path: string): string[] {
+  return path
+    .split('.')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && !s.startsWith('$'));
+}
+
 export function resolveRelationalPath(
   data: unknown,
   path: string,
@@ -40,10 +54,7 @@ export function resolveRelationalPath(
   language: string | null
 ): unknown {
   // Skip Directus virtual segments (e.g. `$thumbnail`) like the rest of the codebase.
-  const segments = path
-    .split('.')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0 && !s.startsWith('$'));
+  const segments = splitPathSegments(path);
 
   let current: unknown = data;
   let collection: string | null = startCollection;
@@ -85,10 +96,7 @@ export function collectTranslationLanguagePaths(
   startCollection: string | null,
   describeHop: DescribeHop
 ): string[] {
-  const segments = path
-    .split('.')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0 && !s.startsWith('$'));
+  const segments = splitPathSegments(path);
 
   const out: string[] = [];
   const acc: string[] = [];
