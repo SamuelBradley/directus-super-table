@@ -306,6 +306,8 @@ import {
   getTranslationLanguageFieldPath,
 } from './composables/useTranslationConfig';
 import { sanitizeFilter } from './utils/sanitizeFilter';
+import { buildNestedM2ADeep } from './utils/buildNestedM2ADeep';
+import { createDescribeHop } from './utils/describeHop';
 import { PER_PAGE_OPTIONS } from './constants/pagination';
 import { DEFAULT_LANGUAGES } from './constants/languages';
 import EditableCellRelational from './components/EditableCellRelational.vue';
@@ -819,6 +821,20 @@ const deep = computed(() => {
       }
     }
   });
+
+  // Nested to-many relations inside expanded M2A item paths (e.g.
+  // treatment.item:service.translations) are not covered by the first-level
+  // entries above and would be capped at the server's default page size.
+  const nestedM2ADeep = buildNestedM2ADeep(
+    fieldsWithRelational.value,
+    createDescribeHop(fieldsStore, relationsStore)
+  );
+  for (const [fieldKey, scopes] of Object.entries(nestedM2ADeep)) {
+    deepFields[fieldKey] = {
+      ...(deepFields[fieldKey] ?? { _fields: ['*'], _limit: -1 }),
+      ...scopes,
+    };
+  }
 
   return Object.keys(deepFields).length > 0 ? deepFields : undefined;
 });
