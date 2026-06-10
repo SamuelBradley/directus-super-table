@@ -5,12 +5,7 @@
     <div class="table-toolbar" v-if="showToolbar">
       <div class="toolbar-content">
         <div class="search-input">
-          <v-input
-            v-model="searchQuery"
-            type="search"
-            :placeholder="t('search_items')"
-            @input="onSearchInput"
-          >
+          <v-input v-model="searchQuery" type="search" :placeholder="t('search_items')">
             <template #prepend>
               <v-icon name="search" />
             </template>
@@ -308,6 +303,7 @@ import {
 import { sanitizeFilter } from './utils/sanitizeFilter';
 import { buildNestedM2ADeep } from './utils/buildNestedM2ADeep';
 import { createDescribeHop } from './utils/describeHop';
+import { createCoalescedRunner } from './utils/coalesce';
 import { PER_PAGE_OPTIONS } from './constants/pagination';
 import { DEFAULT_LANGUAGES } from './constants/languages';
 import EditableCellRelational from './components/EditableCellRelational.vue';
@@ -327,8 +323,6 @@ const props = defineProps<{
   search?: string;
   readonly?: boolean;
   resetPreset?: () => void;
-  resetPresetAndRefresh?: () => void;
-  refresh?: () => void;
   clearFilters?: () => void;
 }>();
 
@@ -336,7 +330,7 @@ const emit = defineEmits<{
   'update:selection': [value: (string | number)[]];
   'update:layoutOptions': [value: LayoutOptions];
   'update:layoutQuery': [value: LayoutQuery];
-  'update:search': [value: string];
+  'update:search': [value: string | null];
   'update:filter': [value: any];
 }>();
 
@@ -754,10 +748,38 @@ const editMode = computed({
   },
 });
 
-// Search
-const searchQuery = ref(search?.value || '');
+// Search — single internal source of truth, mirrored from the native
+// header search (props.search, persisted per preset by Directus core).
+//
+// Native → internal: fully supported. collection.vue binds `:search` on
+// the layout wrapper and updates it per keystroke (no core debounce).
+//
+// Internal → native: NOT supported by the platform. The layout wrapper
+// (createLayoutWrapper, @directus/composables) only forwards
+// update:selection/layoutOptions/layoutQuery and silently swallows
+// `onUpdate:search`. The debounced emit below is a no-op today and kept
+// only for forward-compatibility; the equality guards make it loop-safe
+// should Directus ever whitelist `search` as a writable layout prop.
+const searchQuery = ref('');
+
+watch(
+  search,
+  (val) => {
+    // Native clear emits null; usePreset normalizes '' to null as well.
+    const incoming = val ?? '';
+    if (incoming !== searchQuery.value) {
+      searchQuery.value = incoming;
+    }
+  },
+  { immediate: true }
+);
+
 const onSearchInput = debounce((val: string) => {
-  emit('update:search', val);
+  // Mirror native semantics: empty input is represented as null.
+  const outgoing = val.trim() === '' ? null : val;
+  if ((search?.value ?? null) !== outgoing) {
+    emit('update:search', outgoing);
+  }
 }, 300);
 
 // Computed search filter
@@ -883,25 +905,13 @@ async function handleQuickFilterSaved(event: any) {
   }
 }
 
-// Issue #48: when columnDisplays change in options.vue (sibling slot), the prop
-// round-trip through the parent layout takes a few ticks. flush: 'post' makes
-// the watcher run after the DOM update so aliasedFields has fully settled
-// before we refetch.
-watch(
-  () => (layoutOptions.value as any)?.columnDisplays,
-  () => {
-    getItems();
-  },
-  { deep: true, flush: 'post' }
-);
-
 // Setup event listeners on mount
 onMounted(() => {
   // Load presets from layoutOptions (no localStorage needed)
   loadPresets();
 
   // Load initial items
-  getItems();
+  scheduleGetItems();
 
   // Listen for save events from actions
   window.addEventListener('quick-filter-saved', handleQuickFilterSaved);
@@ -1007,7 +1017,7 @@ async function getItems() {
         alias: aliasQuery.value || undefined,
       }),
       tableApi
-        .fetchItemCount(collection.value, combinedFilter.value, searchQuery.value || undefined)
+        .fetchItemCount(collection.value, combinedFilter.value, undefined, getPrimaryKeyFieldName())
         .catch(() => undefined),
     ]);
     items.value = itemsResult?.data || [];
@@ -1016,41 +1026,47 @@ async function getItems() {
   }
 }
 
+// Every refetch funnels through ONE runner: same-tick watcher storms collapse
+// into one execution, and overlapping executions are serialized with a single
+// trailing re-run (prevents an older response overwriting newer rows).
+// Force-refresh paths (events, auto-save, manual-sort recovery) call this
+// directly and therefore bypass the fingerprint dedupe on purpose: same
+// params, but server data changed.
+const scheduleGetItems = createCoalescedRunner(getItems);
+
 // Create a wrapper function for getItems
 async function refreshItems() {
-  await getItems();
+  await scheduleGetItems();
 }
 
-// Watch for refresh prop calls
-watch(
-  () => props.refresh,
-  (newVal) => {
-    if (newVal) {
-      refreshItems();
-    }
-  }
+// Refetch when the EFFECTIVE query changes. A string fingerprint makes Vue
+// dedupe by content: the upstream computeds rebuild arrays/objects with fresh
+// identity on every recompute (columnDisplaysRef -> aliasedFields ->
+// fieldsWithRelational), which used to re-fire this watcher with identical
+// parameters (e.g. three identical request pairs on bookmark load, and a
+// refetch on every layoutOptions write). Every fetch parameter getItems
+// reads is part of the fingerprint, so the watcher fires exactly when the
+// effective request changes. (searchQuery needs no own key: it only reaches
+// the request through combinedFilter.)
+const queryFingerprint = computed(() =>
+  JSON.stringify({
+    collection: collection.value,
+    fields: fieldsWithRelational.value,
+    filter: combinedFilter.value ?? null,
+    sort: sort.value,
+    page: page.value,
+    limit: limit.value,
+    deep: deep.value ?? null,
+    alias: aliasQuery.value ?? null,
+  })
 );
 
-// Watch for query parameter changes
-watch(
-  [combinedFilter, sort, page, limit, fieldsWithRelational],
-  () => {
-    // Don't refetch during manual sorting
-    if (!isManualSorting) {
-      getItems();
-    }
-  },
-  { deep: true }
-);
-
-watch(
-  () => props.resetPresetAndRefresh,
-  (newVal) => {
-    if (newVal) {
-      refreshItems();
-    }
+watch(queryFingerprint, () => {
+  // Don't refetch during manual sorting (same guard as before)
+  if (!isManualSorting) {
+    scheduleGetItems();
   }
-);
+});
 
 // Handle select all toggle
 function onToggleSelectAll() {
@@ -1072,7 +1088,7 @@ const { edits, savingCells, updateFieldValue, autoSaveEdits } = useTableEdits(
   collection,
   computed(() => primaryKeyField?.value || (primaryKeyField as any) || undefined),
   items,
-  getItems,
+  scheduleGetItems,
   translationConfig.value.languageCodeField
 );
 
@@ -1263,7 +1279,7 @@ async function handleManualSort({ item, to }: { item: any; to: any }) {
     });
   } catch (error: any) {
     // Refresh items to restore correct order on error
-    await getItems();
+    await scheduleGetItems();
 
     notificationsStore.add({
       title: t('error_moving_item'),
@@ -1311,30 +1327,38 @@ watch(searchQuery, (val) => {
 // Handle refresh event from actions component (for duplicate)
 function handleItemsDuplicated() {
   // Refresh the items list
-  getItems();
+  scheduleGetItems();
   // Clear selection after successful duplication
   selection.value = [];
 }
 
-// Setup event listeners for cross-component communication
+// Setup event listeners for cross-component communication.
+// Named handlers so onUnmounted removes the SAME references it registered
+// (the previous inline arrows made the removals silent no-ops).
+function handleItemsDeletedEvent() {
+  refreshItems();
+}
+
+function handleRefreshCollectionEvent(event: any) {
+  if (event.detail?.collection === collection.value) {
+    refreshItems();
+  }
+}
+
 onMounted(() => {
   window.addEventListener('directus-items-duplicated', handleItemsDuplicated);
 
   // Listen for Directus core delete events
-  window.addEventListener('items-deleted', () => refreshItems());
+  window.addEventListener('items-deleted', handleItemsDeletedEvent);
 
   // Listen for collection refresh events
-  window.addEventListener('refresh-collection', (event: any) => {
-    if (event.detail?.collection === collection.value) {
-      refreshItems();
-    }
-  });
+  window.addEventListener('refresh-collection', handleRefreshCollectionEvent);
 });
 
 onUnmounted(() => {
   window.removeEventListener('directus-items-duplicated', handleItemsDuplicated);
-  window.removeEventListener('items-deleted', refreshItems);
-  window.removeEventListener('refresh-collection', refreshItems);
+  window.removeEventListener('items-deleted', handleItemsDeletedEvent);
+  window.removeEventListener('refresh-collection', handleRefreshCollectionEvent);
 });
 </script>
 
