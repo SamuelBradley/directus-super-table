@@ -37,6 +37,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for every to-many hop crossed by an expanded template path, so e.g. a
   translations set larger than the server's default page size (100) is no
   longer silently truncated.
+- **The native header search now drives the layout.** It previously had no
+  effect in this layout (only the toolbar search filtered). Native input is
+  mirrored into the layout search (same intelligent `_or` filter, incl.
+  translations/UUID/integer handling). Note: the reverse direction (toolbar →
+  native header pill) is not possible — the Directus layout wrapper does not
+  forward `update:search` from layouts. The header pill's own little result
+  badge is computed by Directus core with native search semantics and can
+  undercount (e.g. translation-only matches); the table and its pagination
+  use the layout's filter and are authoritative.
+- **Item count no longer double-applies the search.** The count request passed
+  the search as a native `search` param on top of the `_or` filter, so counts
+  could disagree with the visible rows (native search misses translations /
+  UUID / integer matches). The count now uses exactly the list's filter.
+  Counts over to-many search filters (e.g. translations) now use a distinct
+  count, so a single match with several translations no longer inflates the
+  total.
+- **Exactly one fetch per change.** Bookmark loads fired three identical
+  items+count request pairs (identity churn after async language hydration),
+  template edits fired two (duplicate watcher), and every layout-options write
+  (column width, alignment, edit mode) triggered a needless refetch. A content
+  fingerprint plus a coalescing single-flight runner reduce all of these to a
+  single request pair — and overlapping responses can no longer arrive out of
+  order.
+- **Per-segment template validation covers all relational branches.** Junction
+  (`{{treatment.x.y}}`), parent, M2M and M2O/O2M/files tokens are now walked
+  segment by segment like M2A item tokens (translations keep their deliberate
+  client-side tolerance). Drop warnings are deduplicated per session.
 
 Requested by @Abdallah-Awwad as a follow-up to #60.
 
