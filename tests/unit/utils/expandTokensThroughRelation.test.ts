@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { expandTokensThroughRelation } from '@/utils/adjustFieldsForDisplays';
 
 const makeStores = (
@@ -270,8 +270,13 @@ describe('expandTokensThroughRelation', () => {
         {
           'partners_catalog.name': { field: 'name' },
           'partners_catalog.catalog_id': { field: 'catalog_id' },
+          'catalog.title': { field: 'title' },
           'service.name': { field: 'name' },
-          'service.translations': { field: 'translations' },
+          'service.translations': { field: 'translations', meta: { special: ['translations'] } },
+          'service.blocks': { field: 'blocks', meta: { special: ['m2a'] } },
+          'service.attachments': { field: 'attachments', meta: { special: ['files'] } },
+          'service_translations.label': { field: 'label' },
+          'service_translations.languages_code': { field: 'languages_code' },
           // Parent (orders) and junction (orders_treatment) own fields, used to
           // validate bare parent tokens and field-prefixed junction tokens.
           'orders.code': { field: 'code' },
@@ -294,6 +299,17 @@ describe('expandTokensThroughRelation', () => {
                 one_allowed_collections: ['partners_catalog', 'service'],
                 junction_field: 'orders_id',
               },
+            },
+          ],
+          'partners_catalog.catalog_id': [
+            { collection: 'partners_catalog', field: 'catalog_id', related_collection: 'catalog' },
+          ],
+          'service.translations': [
+            {
+              collection: 'service_translations',
+              field: 'service_id',
+              related_collection: 'service',
+              meta: { one_field: 'translations', junction_field: 'languages_code' },
             },
           ],
         }
@@ -474,8 +490,99 @@ describe('expandTokensThroughRelation', () => {
         fieldsStore as any,
         relationsStore as any
       );
-      // The :de-DE is dropped — Directus field paths must not carry it.
-      expect(result).toEqual(['treatment.collection', 'treatment.item:service.translations.label']);
+      // The language companion is emitted alongside (pre-existing behavior;
+      // the old mock just couldn't resolve the translations relation).
+      expect(result).toEqual([
+        'treatment.collection',
+        'treatment.item:service.translations.label',
+        'treatment.item:service.translations.languages_code',
+      ]);
+    });
+
+    it('drops a deep token whose leaf does not exist (validated per segment)', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['item:service.translations.missing_field'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual(['treatment.collection']);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('missing_field'));
+      warnSpy.mockRestore();
+    });
+
+    it('drops a deep token whose middle segment is a scalar (not a relation)', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['item:service.name.deeper'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual(['treatment.collection']);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('service.name'));
+      warnSpy.mockRestore();
+    });
+
+    it('emits a valid deep translations path together with its language companion', () => {
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['item:service.translations.label'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual([
+        'treatment.collection',
+        'treatment.item:service.translations.label',
+        'treatment.item:service.translations.languages_code',
+      ]);
+    });
+
+    it('keeps a path it cannot walk further (nested M2A hop) — permissive, no warn', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['item:service.blocks.title'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      // `blocks` is an M2A hop (relatedCollection unknown) — validation stops
+      // and keeps the token instead of guessing.
+      expect(result).toEqual(['treatment.collection', 'treatment.item:service.blocks.title']);
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('keeps the token when the fields store throws mid-walk (early-boot safety)', () => {
+      const { fieldsStore, relationsStore } = m2aStores();
+      const throwingFieldsStore = {
+        getField: (col: string, f: string) => {
+          if (col === 'service_translations') throw new Error('store not hydrated');
+          return (fieldsStore as any).getField(col, f);
+        },
+      };
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['item:service.translations.label'],
+        throwingFieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toContain('treatment.item:service.translations.label');
     });
 
     it('returns [] when the M2A item relation is missing (defensive)', () => {
@@ -501,6 +608,25 @@ describe('expandTokensThroughRelation', () => {
         relationsStore as any
       );
       expect(result).toEqual([]);
+    });
+
+    it('keeps a deep path across a files hop — permissive, no warn', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { fieldsStore, relationsStore } = m2aStores();
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['item:service.attachments.directus_files_id.title'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual([
+        'treatment.collection',
+        'treatment.item:service.attachments.directus_files_id.title',
+      ]);
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
     });
   });
 });

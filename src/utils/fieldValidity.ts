@@ -7,6 +7,8 @@
  * preset — if the field is recreated later, the column/sort comes back.
  */
 
+import type { DescribeHop } from './resolveRelationalPath';
+
 interface FieldsStoreLike {
   getField: (collection: string | null, field: string) => unknown;
 }
@@ -112,4 +114,54 @@ export function filterValidColumnDisplays<T>(
     }
   }
   return result;
+}
+
+/**
+ * Walk every segment of a relational deep path (as used by M2A
+ * `item:collection.path` template tokens) against the schema. A path is only
+ * sent to the API when each segment exists on its collection and every
+ * intermediate segment is a relational hop we can follow — the API answers
+ * 403 for unknown fields (deliberately, to avoid schema leaks), which would
+ * blank the entire view. Native Directus does NOT validate template fields
+ * (its adjust-fields-for-displays passes unknown keys through), so this is
+ * deliberate hardening beyond native behavior.
+ *
+ * Permissive where the schema cannot be walked further (hop with unknown
+ * related collection, e.g. a nested M2A, or stores throwing during early
+ * boot): the path is kept and the API stays the judge, preserving the
+ * previous behavior for shapes we cannot prove invalid.
+ */
+export function validateDeepPath(
+  startCollection: string,
+  path: string,
+  fieldsStore: { getField: (collection: string, field: string) => unknown },
+  describeHop: DescribeHop
+): { valid: boolean; reason?: string } {
+  const segments = path
+    .split('.')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && !s.startsWith('$'));
+  if (segments.length === 0) return { valid: false, reason: 'empty path' };
+
+  let collection = startCollection;
+  try {
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i]!;
+      if (!fieldsStore.getField(collection, segment)) {
+        return { valid: false, reason: `unknown field "${collection}.${segment}"` };
+      }
+      if (i === segments.length - 1) break; // the leaf may be any existing field
+      const hop = describeHop(collection, segment);
+      if (hop.kind === 'scalar') {
+        return { valid: false, reason: `"${collection}.${segment}" is not a relation` };
+      }
+      // `files` hides a junction level describeHop doesn't expose — like an
+      // unknown related collection we stop walking and keep the path.
+      if (hop.kind === 'files' || !hop.relatedCollection) return { valid: true };
+      collection = hop.relatedCollection;
+    }
+  } catch {
+    return { valid: true };
+  }
+  return { valid: true };
 }

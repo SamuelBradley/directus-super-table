@@ -16,6 +16,7 @@ import {
 import { resolveM2ARelation } from './resolveM2ARelation';
 import { createDescribeHop } from './describeHop';
 import { collectTranslationLanguagePaths } from './resolveRelationalPath';
+import { validateDeepPath } from './fieldValidity';
 
 /**
  * Helper function to get the related collection for a field
@@ -193,10 +194,15 @@ export function expandTokensThroughRelation(
         // (the renderer picks the translation language client-side).
         const { path } = splitLanguageSuffix(parsed.path);
         if (allowedCollections.length > 0 && !allowedCollections.includes(col)) continue;
-        // Only the first path segment is validated against the target — deep
-        // leaves are unvalidated, matching the M2M/M2O branches below.
-        const firstSegment = (path.split('.')[0] ?? '') as string;
-        if (!fieldsStore.getField(col, firstSegment)) continue;
+        // Every segment is walked against the schema; an invalid deep leaf
+        // would otherwise reach the API, 403, and blank the whole view.
+        const validation = validateDeepPath(col, path, fieldsStore, describeHop);
+        if (!validation.valid) {
+          console.warn(
+            `[super-layout-table] Dropped template field "item:${col}.${path}" (${validation.reason})`
+          );
+          continue;
+        }
         add(buildM2AFieldPath(fieldKey, itemField, col, path));
         // For a translations hop, also fetch its language column so the renderer
         // can match the active language instead of falling back to the first row.
