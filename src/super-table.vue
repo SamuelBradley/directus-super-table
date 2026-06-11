@@ -284,6 +284,7 @@ import { useStores, useCollection, useSync, useApi } from '@directus/extensions-
 import { formatTitle } from '@directus/format-title';
 import { getDefaultDisplayForType } from './utils/getDefaultDisplayForType';
 import { filterValidFields, filterValidColumnDisplays } from './utils/fieldValidity';
+import { splitLanguageSuffix, stripLanguageSuffix } from './utils/displayHeuristics';
 import { useTableApi } from './composables/api';
 import { useAliasFields } from './composables/useAliasFields';
 import { useLanguageSelector } from './composables/useLanguageSelector';
@@ -296,12 +297,14 @@ import { usePermissions } from './composables/usePermissions';
 import { useTranslationLanguages } from './composables/useTranslationLanguages';
 import { getTranslationFieldMetadata } from './utils/resolveTranslationsCollection';
 import { buildSearchFilter } from './utils/buildSearchFilter';
+import { normalizeIncomingSearch, normalizeOutgoingSearch } from './utils/searchSync';
 import {
   useTranslationConfig,
   getTranslationLanguageFieldPath,
 } from './composables/useTranslationConfig';
 import { sanitizeFilter } from './utils/sanitizeFilter';
-import { buildNestedM2ADeep } from './utils/buildNestedM2ADeep';
+import { buildNestedM2ADeep, mergeNestedM2ADeep } from './utils/buildNestedM2ADeep';
+import { buildQueryFingerprint } from './utils/buildQueryFingerprint';
 import { createDescribeHop } from './utils/describeHop';
 import { createCoalescedRunner } from './utils/coalesce';
 import { PER_PAGE_OPTIONS } from './constants/pagination';
@@ -482,13 +485,7 @@ const fields = computed({
 
 // Create a computed that strips language suffixes for aliasing
 const fieldsForAliasing = computed(() => {
-  return fields.value.map((field: string) => {
-    // Remove language suffix for alias fields
-    if (field.includes(':')) {
-      return field.split(':')[0];
-    }
-    return field;
-  });
+  return fields.value.map((field: string) => stripLanguageSuffix(field));
 });
 
 // Use alias fields for proper relational data handling.
@@ -579,28 +576,23 @@ const tableHeaders = computed(() => {
   const activeFields = fields.value
     .filter((rawKey: string) => {
       // Permission gate: drop language-suffixed translation fields the user can't read
-      if (rawKey.includes(':')) {
-        const [path, lang] = rawKey.split(':');
-        if (path.startsWith('translations.')) {
-          if (accessibleLanguages.length > 0 && !accessibleLanguages.includes(lang)) return false;
-          const subField = path.split('.').slice(1).join('.');
-          if (translationsCollection && !permissions.canRead(translationsCollection, subField))
-            return false;
-        }
+      const { path, language: lang } = splitLanguageSuffix(rawKey);
+      if (lang !== null && path.startsWith('translations.')) {
+        if (accessibleLanguages.length > 0 && !accessibleLanguages.includes(lang)) return false;
+        const subField = path.split('.').slice(1).join('.');
+        if (translationsCollection && !permissions.canRead(translationsCollection, subField))
+          return false;
       }
       // Permission gate: drop main-collection fields the user can't read
-      const rootField = rawKey.split(':')[0].split('.')[0];
+      const rootField = stripLanguageSuffix(rawKey).split('.')[0];
       if (!permissions.canRead(collection.value, rootField)) return false;
       return true;
     })
     .map((key: string) => {
       // Check if field has language suffix (e.g., "translations.description:de-DE")
-      let actualFieldKey = key;
-      let languageCode = null;
-
-      if (key.includes(':')) {
-        [actualFieldKey, languageCode] = key.split(':');
-      }
+      const split = splitLanguageSuffix(key);
+      let actualFieldKey = split.path;
+      let languageCode = split.language;
 
       let fieldData = fieldsStore.getField(collection.value, actualFieldKey);
 
@@ -646,7 +638,7 @@ const tableHeaders = computed(() => {
     }
 
     // Handle nested field paths like "translations.title"
-    const actualKey = field.key.includes(':') ? field.key.split(':')[0] : field.key;
+    const actualKey = stripLanguageSuffix(field.key);
     const fieldParts = actualKey.split('.');
     if (fieldParts.length > 1) {
       const fieldNames = fieldParts.map((fieldKey: string, index: number) => {
@@ -761,31 +753,54 @@ const editMode = computed({
 // only for forward-compatibility; the equality guards make it loop-safe
 // should Directus ever whitelist `search` as a writable layout prop.
 const searchQuery = ref('');
+// Debounced mirror that actually drives the request filter, so fast typing
+// fires one fetch after the user pauses instead of one per keystroke. Seeded
+// synchronously on preset hydration / native change (below) so a
+// preset-restored search already filters the FIRST load.
+const debouncedSearchQuery = ref('');
+const applyDebouncedSearch = debounce((val: string) => {
+  debouncedSearchQuery.value = val;
+}, 300);
 
+// Only the FIRST hydration must reflect into the request filter synchronously
+// (a preset-restored search has to filter the initial load — no unfiltered
+// flash). Every change after that — including typing in the native header —
+// flows through watch(searchQuery) and the 300ms debounce, so the native
+// search no longer fetches once per keystroke.
+let searchSeeded = false;
 watch(
   search,
   (val) => {
     // Native clear emits null; usePreset normalizes '' to null as well.
-    const incoming = val ?? '';
+    const incoming = normalizeIncomingSearch(val);
     if (incoming !== searchQuery.value) {
       searchQuery.value = incoming;
+      if (!searchSeeded) {
+        // First hydration: watch(searchQuery) isn't registered yet, so seed the
+        // debounced query directly and cancel any pending typing-debounce.
+        applyDebouncedSearch.cancel();
+        debouncedSearchQuery.value = incoming;
+      }
+      // Later changes: watch(searchQuery) schedules the debounced update.
     }
+    searchSeeded = true;
   },
   { immediate: true }
 );
 
 const onSearchInput = debounce((val: string) => {
   // Mirror native semantics: empty input is represented as null.
-  const outgoing = val.trim() === '' ? null : val;
+  const outgoing = normalizeOutgoingSearch(val);
   if ((search?.value ?? null) !== outgoing) {
     emit('update:search', outgoing);
   }
 }, 300);
 
-// Computed search filter
+// Computed search filter — reads the DEBOUNCED query so the request lags
+// typing by one debounce window instead of recomputing per keystroke.
 const searchFilter = computed(() =>
   buildSearchFilter({
-    query: searchQuery.value,
+    query: debouncedSearchQuery.value,
     visibleFields: fields.value,
     fieldsInCollection: fieldsInCollection.value,
     collection: collection.value,
@@ -800,7 +815,7 @@ const deep = computed(() => {
 
   fields.value.forEach((field: string) => {
     // Remove language suffix if present
-    const actualField = field.includes(':') ? field.split(':')[0] : field;
+    const actualField = stripLanguageSuffix(field);
 
     // Handle dot-notation relational fields (like "user_created.first_name")
     if (actualField.includes('.')) {
@@ -847,16 +862,10 @@ const deep = computed(() => {
   // Nested to-many relations inside expanded M2A item paths (e.g.
   // treatment.item:service.translations) are not covered by the first-level
   // entries above and would be capped at the server's default page size.
-  const nestedM2ADeep = buildNestedM2ADeep(
-    fieldsWithRelational.value,
-    createDescribeHop(fieldsStore, relationsStore)
+  mergeNestedM2ADeep(
+    deepFields,
+    buildNestedM2ADeep(fieldsWithRelational.value, createDescribeHop(fieldsStore, relationsStore))
   );
-  for (const [fieldKey, scopes] of Object.entries(nestedM2ADeep)) {
-    deepFields[fieldKey] = {
-      ...(deepFields[fieldKey] ?? { _fields: ['*'], _limit: -1 }),
-      ...scopes,
-    };
-  }
 
   return Object.keys(deepFields).length > 0 ? deepFields : undefined;
 });
@@ -1049,15 +1058,15 @@ async function refreshItems() {
 // effective request changes. (searchQuery needs no own key: it only reaches
 // the request through combinedFilter.)
 const queryFingerprint = computed(() =>
-  JSON.stringify({
+  buildQueryFingerprint({
     collection: collection.value,
     fields: fieldsWithRelational.value,
-    filter: combinedFilter.value ?? null,
+    filter: combinedFilter.value,
     sort: sort.value,
     page: page.value,
     limit: limit.value,
-    deep: deep.value ?? null,
-    alias: aliasQuery.value ?? null,
+    deep: deep.value,
+    alias: aliasQuery.value,
   })
 );
 
@@ -1321,6 +1330,7 @@ function handleTableRowClick({ item, event }: { item: Item; event: MouseEvent })
 
 // Watch for search changes
 watch(searchQuery, (val) => {
+  applyDebouncedSearch(val);
   onSearchInput(val);
 });
 
