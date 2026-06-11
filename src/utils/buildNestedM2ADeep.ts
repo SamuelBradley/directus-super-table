@@ -15,12 +15,13 @@ const TO_MANY_KINDS = new Set(['o2m', 'm2m', 'm2a', 'files', 'translations']);
  * ready to merge into the layout's deep object.
  *
  * The `item:<collection>` scope key is matched literally by the API's deep
- * parser (api/src/database/get-ast-from-query/lib/parse-fields.ts, unchanged
- * v9 → main) and recurses — verified live on 11.11.0 at depth 2. It is
- * undocumented upstream, so re-verify on major Directus upgrades. Emit
- * `_limit` ONLY here: nested deep with dynamic-variable filters is unreliable
- * on 11.x (unawaited sanitizeDeep recursion, directus/directus#27676,
- * fixed in v12).
+ * parser: api/src/database/get-ast-from-query/lib/parse-fields.ts looks the
+ * scoped subtree up by `${fieldKey}:${relatedCollection}` (v11.11.0 lines
+ * 222 + 228) and feeds it back into the recursive parser — unchanged v9 →
+ * main, verified live on 11.11.0 at depth 2. It is undocumented upstream, so
+ * re-verify on major Directus upgrades. Emit `_limit` ONLY here: nested deep
+ * with dynamic-variable filters is unreliable on 11.x (unawaited
+ * sanitizeDeep recursion, directus/directus#27676, fixed in v12).
  */
 export function buildNestedM2ADeep(
   expandedFields: readonly string[],
@@ -50,4 +51,24 @@ export function buildNestedM2ADeep(
   }
 
   return result;
+}
+
+/**
+ * Merge nested M2A deep entries (from `buildNestedM2ADeep`) into an existing
+ * `deep` object: preserves each field's existing `_fields`/`_limit` and adds
+ * the `item:<collection>` scope keys. A field absent from `deepFields` gets a
+ * sensible M2A default (`{ _fields: ['*'], _limit: -1 }`). Mutates and returns
+ * `deepFields`.
+ */
+export function mergeNestedM2ADeep(
+  deepFields: Record<string, any>,
+  nested: Record<string, Record<string, any>>
+): Record<string, any> {
+  for (const [fieldKey, scopes] of Object.entries(nested)) {
+    deepFields[fieldKey] = {
+      ...(deepFields[fieldKey] ?? { _fields: ['*'], _limit: -1 }),
+      ...scopes,
+    };
+  }
+  return deepFields;
 }
