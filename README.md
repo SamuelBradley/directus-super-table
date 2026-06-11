@@ -180,7 +180,9 @@ name clash the most specific (deepest) match wins:
 - **Deep paths through the target work too**, including a `translations`
   relation stored inside the target: `{{item:service.translations.label}}`.
   Add a `:lang` suffix to choose the language (`…translations.label:de-DE`);
-  without it the current user's language is used.
+  without it the current user's language is used. The `:lang` suffix is
+  honored on M2A `item:` tokens only; on other relational columns it is not
+  interpreted (and an invalid path is dropped rather than sent to the API).
 
 Each junction row only resolves the item token whose `<collection>` matches its own
 target, so a template can cover every allowed collection at once:

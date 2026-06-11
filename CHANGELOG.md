@@ -45,7 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   forward `update:search` from layouts. The header pill's own little result
   badge is computed by Directus core with native search semantics and can
   undercount (e.g. translation-only matches); the table and its pagination
-  use the layout's filter and are authoritative.
+  use the layout's filter and are authoritative. For the same reason, clearing
+  the search from inside the layout cannot clear the native header pill — the
+  table filters correctly, but the pill keeps its text until cleared natively.
 - **Item count no longer double-applies the search.** The count request passed
   the search as a native `search` param on top of the `_or` filter, so counts
   could disagree with the visible rows (native search misses translations /
