@@ -8,6 +8,7 @@
  */
 
 import { splitPathSegments, type DescribeHop } from './resolveRelationalPath';
+import { stripLanguageSuffix } from './displayHeuristics';
 
 interface FieldsStoreLike {
   getField: (collection: string | null, field: string) => unknown;
@@ -28,10 +29,7 @@ function normalizeFieldKey(key: string, stripSortPrefix: boolean): string {
   if (stripSortPrefix && normalized.startsWith('-')) {
     normalized = normalized.substring(1);
   }
-  if (normalized.includes(':')) {
-    normalized = normalized.split(':')[0] ?? '';
-  }
-  return normalized;
+  return stripLanguageSuffix(normalized);
 }
 
 /**

@@ -1,5 +1,6 @@
 import { computed, type Ref } from 'vue';
 import type { Language } from '../types/table.types';
+import { splitLanguageSuffix, stripLanguageSuffix } from '../utils/displayHeuristics';
 
 /**
  * Composable for detecting existing languages in translation fields
@@ -19,8 +20,8 @@ export function useExistingLanguageDetection(
 
     return currentFields.value
       .filter((field) => field.startsWith(baseFieldKey + ':'))
-      .map((field) => field.split(':')[1])
-      .filter(Boolean); // Remove any undefined values
+      .map((field) => splitLanguageSuffix(field).language)
+      .filter(Boolean) as string[]; // Remove any null values
   }
 
   /**
@@ -60,10 +61,7 @@ export function useExistingLanguageDetection(
    * @returns Base field key (e.g., "translations.description")
    */
   function getBaseFieldKey(fieldKey: string): string {
-    if (fieldKey.includes(':')) {
-      return fieldKey.split(':')[0];
-    }
-    return fieldKey;
+    return stripLanguageSuffix(fieldKey);
   }
 
   /**

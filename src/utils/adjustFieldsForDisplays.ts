@@ -11,6 +11,7 @@ import {
   isM2APrefix,
   stripM2AFieldPrefix,
   splitLanguageSuffix,
+  stripLanguageSuffix,
   M2A_COLLECTION_TOKEN,
 } from './displayHeuristics';
 import { resolveM2ARelation } from './resolveM2ARelation';
@@ -368,7 +369,7 @@ export function adjustFieldsForDisplays(
       // (translations.title), but layoutQuery.fields entries can carry a language
       // suffix (translations.title:de-DE). Strip the suffix before lookup so a
       // single override applies to every language column for the same root field.
-      const storageKey = fieldKey.includes(':') ? fieldKey.split(':')[0] : fieldKey;
+      const storageKey = stripLanguageSuffix(fieldKey);
       const override = overrides[storageKey];
       if (override?.template) {
         const tokens = parseTemplateTokens(override.template);

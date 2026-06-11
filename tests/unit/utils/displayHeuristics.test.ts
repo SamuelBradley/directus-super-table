@@ -10,6 +10,7 @@ import {
   isM2APrefix,
   stripM2AFieldPrefix,
   splitLanguageSuffix,
+  stripLanguageSuffix,
 } from '@/utils/displayHeuristics';
 
 describe('isRelational', () => {
@@ -424,5 +425,21 @@ describe('splitLanguageSuffix', () => {
       language: null,
     });
     expect(splitLanguageSuffix('name')).toEqual({ path: 'name', language: null });
+  });
+});
+
+describe('stripLanguageSuffix', () => {
+  it('returns the key unchanged when there is no suffix', () => {
+    expect(stripLanguageSuffix('title')).toBe('title');
+    expect(stripLanguageSuffix('translations.description')).toBe('translations.description');
+  });
+  it('strips a single trailing language suffix', () => {
+    expect(stripLanguageSuffix('translations.description:de-DE')).toBe('translations.description');
+  });
+  it('strips only the LAST colon segment (documents last-colon semantics)', () => {
+    expect(stripLanguageSuffix('a:b:de-DE')).toBe('a:b');
+  });
+  it('handles an empty trailing suffix', () => {
+    expect(stripLanguageSuffix('x:')).toBe('x');
   });
 });
