@@ -100,8 +100,14 @@ export function useTableApi() {
         if (filter) params.filter = filter;
         if (search) params.search = search;
         const response = await api.get(`/items/${collection}`, { params });
-        // Directus returns countDistinct under data[0].countDistinct.<fieldName>
-        const count = Number(response.data?.data?.[0]?.countDistinct?.[primaryKeyField] ?? 0);
+        // Directus returns countDistinct under data[0].countDistinct.<fieldName>.
+        // Guard the shape: on an unexpected (but non-throwing) response, fall
+        // through to the count(*) path instead of silently reporting 0.
+        const raw = response.data?.data?.[0]?.countDistinct?.[primaryKeyField];
+        const count = Number(raw);
+        if (raw == null || !Number.isFinite(count)) {
+          throw new Error('unexpected countDistinct response shape');
+        }
         filterCount.value = count;
         totalCount.value = count;
         return count;
