@@ -66,6 +66,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`{{treatment.x.y}}`), parent, M2M and M2O/O2M/files tokens are now walked
   segment by segment like M2A item tokens (translations keep their deliberate
   client-side tolerance). Drop warnings are deduplicated per session.
+- **Column Display Template editor: lossless textarea + field picker.** The
+  native chip editor silently dropped the extension-only `:lang` suffix on
+  nested-translation tokens (and re-serialized it away on edit). It is replaced
+  by a plain textarea (every token visible, lossless round-trip) plus a
+  schema-driven "+" field picker: for M2A columns it drills target collections
+  incl. nested translations and offers an inline language choice (inserting the
+  full `…:de-DE` token); for other relational columns it inserts relative
+  tokens. Scalar / per-language translation columns show the textarea only.
 
 Requested by @Abdallah-Awwad as a follow-up to #60.
 
