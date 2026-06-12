@@ -13,19 +13,37 @@
 
     <div class="field">
       <div class="label">
-        Display Template
+        <span>Display Template</span>
         <v-icon v-if="m2aHelp" v-tooltip="m2aHelp.tooltip" name="help" small class="help-icon" />
+        <div class="spacer" />
+        <TemplateFieldPicker
+          v-if="pickerContext"
+          :context="pickerContext"
+          :languages="languages"
+          @select="insertToken"
+        />
       </div>
-      <interface-system-display-template
-        :collection-name="targetCollection"
-        :value="form.template"
+      <!-- Plain-text editor: the native chip editor (system-display-template)
+           silently drops the extension-only `:lang` suffix on nested-translation
+           tokens and would re-serialize it away on edit (data loss). A raw
+           textarea round-trips the template losslessly and keeps every token
+           visible. -->
+      <v-textarea
+        ref="templateRef"
+        :model-value="form.template"
         placeholder="{{ field }}"
-        :include-relations="true"
-        @input="form.template = $event ?? ''"
+        :nullable="false"
+        @update:model-value="form.template = $event ?? ''"
       />
-      <div v-if="m2aHelp" class="hint">
-        Many-to-Any field — pick fields from the tree, or write
-        <code>{{ itemToken }}</code> by hand.
+      <div class="hint">
+        Write the template with <code>{{ fieldToken }}</code> tokens.
+        <template v-if="m2aHelp">
+          For this Many-to-Any field use <code>{{ collectionToken }}</code> and
+          <code>{{ itemToken }}</code
+          >; add a <code>:lang</code> suffix to pin a nested-translation language (e.g.
+          <code>{{ langExampleToken }}</code
+          >).
+        </template>
       </div>
     </div>
 
@@ -37,11 +55,18 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, ref, watch } from 'vue';
+import { computed, ref, watch, onMounted, nextTick } from 'vue';
 import { useStores } from '@directus/extensions-sdk';
 import type { ColumnDisplay } from '../composables/useColumnDisplays';
-import { isRelational, isM2A, resolveTargetCollection } from '../utils/displayHeuristics';
+import {
+  isM2A,
+  isRelational,
+  resolveTargetCollection,
+  stripLanguageSuffix,
+} from '../utils/displayHeuristics';
 import { resolveM2ARelation } from '../utils/resolveM2ARelation';
+import { useLanguageSelector } from '../composables/useLanguageSelector';
+import TemplateFieldPicker from './TemplateFieldPicker.vue';
 
 const props = defineProps<{
   mode: 'add' | 'edit';
@@ -65,25 +90,72 @@ const form = ref<{ fieldKey: string; template: string }>({
   template: props.initialValue?.template ?? '',
 });
 
-const targetCollection = computed(() => {
-  if (!form.value.fieldKey) return null;
-  // Strip language suffix (translations.title:de-DE → translations.title)
-  const rootKey = form.value.fieldKey.includes(':')
-    ? form.value.fieldKey.split(':')[0]
-    : form.value.fieldKey;
-  // Use root field on the parent for relational lookup
-  const rootField = rootKey.split('.')[0];
-  const fieldDef = fieldsStore.getField(props.collection, rootField);
-  if (!fieldDef) return props.collection;
-  if (!isRelational(fieldDef)) return props.collection;
-  const target = resolveTargetCollection(fieldDef, relationsStore as any, fieldsStore as any);
-  return target ?? props.collection;
+const { languages, fetchLanguages } = useLanguageSelector();
+onMounted(() => {
+  void fetchLanguages();
 });
 
-// Literal token examples for the M2A help notice (kept out of the template so
-// the mustache braces aren't parsed as Vue interpolation).
+// Field picker context derived from the column's relation type. Null → no
+// picker button (scalar / per-language translation columns: a token template
+// doesn't apply there).
+const pickerContext = computed(() => {
+  if (!form.value.fieldKey) return null;
+  const rootField = stripLanguageSuffix(form.value.fieldKey).split('.')[0];
+  if (!rootField) return null;
+  const fieldDef = fieldsStore.getField(props.collection, rootField);
+  if (!fieldDef) return null;
+  if (isM2A(fieldDef)) {
+    const m2a = resolveM2ARelation(props.collection, rootField, relationsStore, fieldsStore);
+    if (!m2a) return null;
+    return {
+      mode: 'm2a' as const,
+      fieldKey: rootField,
+      allowedCollections: m2a.allowedCollections,
+    };
+  }
+  if (isRelational(fieldDef)) {
+    // Per-language translation columns render via resolveTranslationValue (the
+    // column key carries the language), not via a token template — so a picker
+    // would only insert dead tokens. No button there.
+    if (fieldDef.meta?.special?.includes('translations')) return null;
+    const related = resolveTargetCollection(fieldDef, relationsStore as any, fieldsStore as any);
+    if (!related) return null;
+    return { mode: 'relative' as const, relatedCollection: related };
+  }
+  return null;
+});
+
+const templateRef = ref<any>(null);
+function innerTextarea(): HTMLTextAreaElement | null {
+  const root = templateRef.value?.$el as HTMLElement | undefined;
+  return (root?.querySelector('textarea') as HTMLTextAreaElement) ?? null;
+}
+
+// Insert a picker token at the textarea's last caret position (a blurred
+// textarea retains its selection), replacing any selection. Falls back to
+// appending. The textarea stays the lossless source of truth.
+function insertToken(token: string) {
+  const el = innerTextarea();
+  const current = form.value.template;
+  const start = el ? (el.selectionStart ?? current.length) : current.length;
+  const end = el ? (el.selectionEnd ?? current.length) : current.length;
+  form.value.template = current.slice(0, start) + token + current.slice(end);
+  void nextTick(() => {
+    const after = innerTextarea();
+    if (after) {
+      const caret = start + token.length;
+      after.focus();
+      after.setSelectionRange(caret, caret);
+    }
+  });
+}
+
+// Literal token examples for the help notice (kept out of the template so the
+// mustache braces aren't parsed as Vue interpolation).
+const fieldToken = '{{ field }}';
 const collectionToken = '{{collection}}';
 const itemToken = '{{item:<collection>.<field>}}';
+const langExampleToken = '{{item:<collection>.translations.<field>:de-DE}}';
 
 // The system display-template picker can't introspect the polymorphic M2A
 // target, so guide the user to the `item:collection.field` token syntax.
@@ -103,7 +175,7 @@ const m2aHelp = computed(() => {
     : '{{collection}}: {{item:<collection>.name}}';
   const allowed = collections.length ? `Allowed collections: ${collections.join(', ')}. ` : '';
   const tooltip =
-    `Many-to-Any field. Pick fields from the template tree, or write tokens by hand: ` +
+    `Many-to-Any field. Write tokens by hand: ` +
     `${collectionToken} for the target collection and ${itemToken} for its values. ` +
     `${allowed}Example: ${example}`;
   return { tooltip };
@@ -155,6 +227,9 @@ watch(
   color: var(--foreground-normal);
   font-weight: 600;
   font-size: 13px;
+}
+.label .spacer {
+  flex: 1 1 auto;
 }
 .help-icon {
   --v-icon-color: var(--foreground-subdued);
