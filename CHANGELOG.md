@@ -5,6 +5,78 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.6.0 — Deep relational paths in M2A templates (nested translations)
+
+### Added
+- **M2A templates resolve deep relational paths**, including a `translations`
+  relation stored *inside* the target collection — e.g.
+  `{{item:service.translations.label}}` (M2A → target → translations → value).
+  Resolution is generic and schema-driven: each hop is interpreted via the
+  relations store, so it scales to arbitrary depth (M2O chains, files, nested
+  translations) without per-level special-casing.
+- **Per-relation language-field detection.** The translation language column is
+  read from the relation (its `junction_field`), not hardcoded — so collections
+  using a non-default language field still resolve.
+- **Language selection for nested translations.** An optional `:lang` suffix on
+  the token (`…translations.label:de-DE`) picks the language; without it the
+  current user's language is used, falling back to the first available row.
+
+### Fixed
+- **Invalid deep template fields no longer blank the view.** Every segment of
+  an `item:collection.path` token is now validated against the schema before
+  the request is built; unknown fields are dropped with a `console.warn`
+  (`[super-layout-table] Dropped template field …`) and the cell degrades to
+  an empty value — previously the API rejected the whole request (403) and the
+  table rendered zero rows with no hint.
+- **HTML translation values render as plain text in M2A cells.** Resolved
+  template values are stripped of HTML tags (entities decoded, script/style
+  contents dropped), matching the native `formatted-value` display used by
+  regular columns; raw `<p data-start=…>` markup is no longer shown.
+- **Nested to-many relations inside M2A items are fetched unbounded.** The
+  items request now emits `deep[<field>][item:<collection>][<relation>][_limit]=-1`
+  for every to-many hop crossed by an expanded template path, so e.g. a
+  translations set larger than the server's default page size (100) is no
+  longer silently truncated.
+- **The native header search now drives the layout.** It previously had no
+  effect in this layout (only the toolbar search filtered). Native input is
+  mirrored into the layout search (same intelligent `_or` filter, incl.
+  translations/UUID/integer handling). Note: the reverse direction (toolbar →
+  native header pill) is not possible — the Directus layout wrapper does not
+  forward `update:search` from layouts. The header pill's own little result
+  badge is computed by Directus core with native search semantics and can
+  undercount (e.g. translation-only matches); the table and its pagination
+  use the layout's filter and are authoritative. For the same reason, clearing
+  the search from inside the layout cannot clear the native header pill — the
+  table filters correctly, but the pill keeps its text until cleared natively.
+- **Item count no longer double-applies the search.** The count request passed
+  the search as a native `search` param on top of the `_or` filter, so counts
+  could disagree with the visible rows (native search misses translations /
+  UUID / integer matches). The count now uses exactly the list's filter.
+  Counts over to-many search filters (e.g. translations) now use a distinct
+  count, so a single match with several translations no longer inflates the
+  total.
+- **Exactly one fetch per change.** Bookmark loads fired three identical
+  items+count request pairs (identity churn after async language hydration),
+  template edits fired two (duplicate watcher), and every layout-options write
+  (column width, alignment, edit mode) triggered a needless refetch. A content
+  fingerprint plus a coalescing single-flight runner reduce all of these to a
+  single request pair — and overlapping responses can no longer arrive out of
+  order.
+- **Per-segment template validation covers all relational branches.** Junction
+  (`{{treatment.x.y}}`), parent, M2M and M2O/O2M/files tokens are now walked
+  segment by segment like M2A item tokens (translations keep their deliberate
+  client-side tolerance). Drop warnings are deduplicated per session.
+- **Column Display Template editor: lossless textarea + field picker.** The
+  native chip editor silently dropped the extension-only `:lang` suffix on
+  nested-translation tokens (and re-serialized it away on edit). It is replaced
+  by a plain textarea (every token visible, lossless round-trip) plus a
+  schema-driven "+" field picker: for M2A columns it drills target collections
+  incl. nested translations and offers an inline language choice (inserting the
+  full `…:de-DE` token); for other relational columns it inserts relative
+  tokens. Scalar / per-language translation columns show the textarea only.
+
+Requested by @Abdallah-Awwad as a follow-up to #60.
+
 ## v0.5.1 — M2A picker templates, field scopes & guard fix (Issue #60)
 
 ### Fixed

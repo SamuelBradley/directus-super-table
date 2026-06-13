@@ -7,6 +7,9 @@
  * preset — if the field is recreated later, the column/sort comes back.
  */
 
+import { splitPathSegments, type DescribeHop } from './resolveRelationalPath';
+import { stripLanguageSuffix } from './displayHeuristics';
+
 interface FieldsStoreLike {
   getField: (collection: string | null, field: string) => unknown;
 }
@@ -26,10 +29,7 @@ function normalizeFieldKey(key: string, stripSortPrefix: boolean): string {
   if (stripSortPrefix && normalized.startsWith('-')) {
     normalized = normalized.substring(1);
   }
-  if (normalized.includes(':')) {
-    normalized = normalized.split(':')[0] ?? '';
-  }
-  return normalized;
+  return stripLanguageSuffix(normalized);
 }
 
 /**
@@ -112,4 +112,58 @@ export function filterValidColumnDisplays<T>(
     }
   }
   return result;
+}
+
+/**
+ * Walk every segment of a relational deep path (used by every relational
+ * template-token branch: M2A item/junction/parent, M2M, M2O/O2M/files)
+ * against the schema. A path is only sent to the API when each segment exists
+ * on its collection and every intermediate segment is a relational hop we can
+ * follow — the API answers 403 for unknown fields (deliberately, to avoid
+ * schema leaks), which would blank the entire view. Native Directus does NOT
+ * validate template fields (its adjust-fields-for-displays passes unknown keys
+ * through), so this is deliberate hardening beyond native behavior.
+ *
+ * Permissive where the schema cannot be walked further (hop with unknown
+ * related collection, e.g. a nested M2A, or stores throwing during early
+ * boot): the path is kept and the API stays the judge, preserving the
+ * previous behavior for shapes we cannot prove invalid.
+ */
+export function validateDeepPath(
+  startCollection: string,
+  path: string,
+  fieldsStore: { getField: (collection: string, field: string) => unknown },
+  describeHop: DescribeHop
+): { valid: boolean; reason?: string } {
+  const segments = splitPathSegments(path);
+  if (segments.length === 0) return { valid: false, reason: 'empty path' };
+
+  let collection = startCollection;
+  try {
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i]!;
+      if (!fieldsStore.getField(collection, segment)) {
+        return { valid: false, reason: `unknown field "${collection}.${segment}"` };
+      }
+      if (i === segments.length - 1) break; // the leaf may be any existing field
+      const hop = describeHop(collection, segment);
+      if (hop.kind === 'scalar') {
+        // NOTE: describeHop also maps INTERNAL store throws to 'scalar'
+        // (see createDescribeHop). If only the relations store throws while
+        // the fields store answered (the getField above succeeded), this
+        // rejects a path we could not actually inspect. Accepted trade-off:
+        // the window is store-bootstrap only, the drop self-heals on the
+        // next recompute after hydration, and a dedicated 'unknown' hop kind
+        // would ripple through every HopKind consumer for an unobserved case.
+        return { valid: false, reason: `"${collection}.${segment}" is not a relation` };
+      }
+      // `files` hides a junction level describeHop doesn't expose — like an
+      // unknown related collection we stop walking and keep the path.
+      if (hop.kind === 'files' || !hop.relatedCollection) return { valid: true };
+      collection = hop.relatedCollection;
+    }
+  } catch {
+    return { valid: true };
+  }
+  return { valid: true };
 }

@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue';
 import { useApi } from '@directus/extensions-sdk';
 import type { Item, Filter } from '@directus/types';
+import { filterUsesSome } from '../utils/filterUsesSome';
 
 export interface ApiOptions {
   collection: string;
@@ -78,12 +79,43 @@ export function useTableApi() {
    * `aggregate[countDistinct]=<pk>` both 403 when the user lacks PK access.
    * Returns the previous count on failure so a transient aggregate error
    * doesn't reset pagination to zero.
+   *
+   * Exception: when `primaryKeyField` is provided and the filter contains a
+   * `_some` operator (to-many join), `COUNT(*)` counts the join product instead
+   * of distinct parent rows — e.g. 1 item with 4 matching translations returns
+   * 4.  In that case we attempt `countDistinct(<pk>)` first and fall back to
+   * `count(*)` when it 403s (permission-denied on PK).
    */
   async function fetchItemCount(
     collection: string,
     filter?: Filter,
-    search?: string
+    search?: string,
+    primaryKeyField?: string
   ): Promise<number> {
+    // Use countDistinct when the filter crosses a to-many boundary (_some) and
+    // the caller supplied the PK field name.  Fall back to count(*) on error.
+    if (primaryKeyField && filter && filterUsesSome(filter)) {
+      try {
+        const params: any = { aggregate: { countDistinct: primaryKeyField } };
+        if (filter) params.filter = filter;
+        if (search) params.search = search;
+        const response = await api.get(`/items/${collection}`, { params });
+        // Directus returns countDistinct under data[0].countDistinct.<fieldName>.
+        // Guard the shape: on an unexpected (but non-throwing) response, fall
+        // through to the count(*) path instead of silently reporting 0.
+        const raw = response.data?.data?.[0]?.countDistinct?.[primaryKeyField];
+        const count = Number(raw);
+        if (raw == null || !Number.isFinite(count)) {
+          throw new Error('unexpected countDistinct response shape');
+        }
+        filterCount.value = count;
+        totalCount.value = count;
+        return count;
+      } catch {
+        // 403 or other error — fall through to the permissive count(*) path.
+      }
+    }
+
     try {
       const params: any = { aggregate: { count: '*' } };
       if (filter) params.filter = filter;

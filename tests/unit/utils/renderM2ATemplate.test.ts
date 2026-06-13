@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { renderM2ATemplate } from '@/utils/renderM2ATemplate';
+import type { DescribeHop } from '@/utils/resolveRelationalPath';
 
 // Junction rows mirror the live orders.treatment shape: a `collection`
 // discriminator + a polymorphic `item` payload. `treatment` is the parent
@@ -210,6 +211,155 @@ describe('renderM2ATemplate', () => {
       expect(renderM2ATemplate(row, '{{code}}', itemField, discriminator, fieldName).trim()).toBe(
         ''
       );
+    });
+  });
+
+  // Deep relational paths — e.g. a translations relation INSIDE the M2A target —
+  // resolved via the schema-aware describeHop + the `:lang` suffix (issue #60 follow-up).
+  describe('deep relational paths via describeHop', () => {
+    const describeHop: DescribeHop = (collection, field) =>
+      collection === 'service' && field === 'translations'
+        ? {
+            kind: 'translations',
+            relatedCollection: 'service_translations',
+            languageField: 'languages_code',
+          }
+        : { kind: 'scalar' };
+
+    const row = {
+      collection: 'service',
+      item: {
+        translations: [
+          { languages_code: 'en-US', label: 'Maintenance (EN)' },
+          { languages_code: 'de-DE', label: 'Wartung (DE)' },
+        ],
+      },
+    };
+
+    it('resolves a nested translation in the language from the :lang suffix', () => {
+      expect(
+        renderM2ATemplate(
+          row,
+          '{{treatment.item:service.translations.label:de-DE}}',
+          itemField,
+          discriminator,
+          fieldName,
+          null,
+          { describeHop }
+        ).trim()
+      ).toBe('Wartung (DE)');
+      expect(
+        renderM2ATemplate(
+          row,
+          '{{treatment.item:service.translations.label:en-US}}',
+          itemField,
+          discriminator,
+          fieldName,
+          null,
+          { describeHop }
+        ).trim()
+      ).toBe('Maintenance (EN)');
+    });
+
+    it('falls back to the first translation row without a :lang suffix', () => {
+      expect(
+        renderM2ATemplate(
+          row,
+          '{{treatment.item:service.translations.label}}',
+          itemField,
+          discriminator,
+          fieldName,
+          null,
+          { describeHop }
+        ).trim()
+      ).toBe('Maintenance (EN)');
+    });
+
+    it('uses opts.language as the default when no :lang suffix is present', () => {
+      expect(
+        renderM2ATemplate(
+          row,
+          '{{treatment.item:service.translations.label}}',
+          itemField,
+          discriminator,
+          fieldName,
+          null,
+          { describeHop, language: 'de-DE' }
+        ).trim()
+      ).toBe('Wartung (DE)');
+    });
+
+    it('lets the token :lang suffix override opts.language', () => {
+      expect(
+        renderM2ATemplate(
+          row,
+          '{{treatment.item:service.translations.label:en-US}}',
+          itemField,
+          discriminator,
+          fieldName,
+          null,
+          { describeHop, language: 'de-DE' }
+        ).trim()
+      ).toBe('Maintenance (EN)');
+    });
+
+    it('renders empty for the nested translation without a resolver (back-compat)', () => {
+      expect(
+        renderM2ATemplate(
+          row,
+          '{{treatment.item:service.translations.label:de-DE}}',
+          itemField,
+          discriminator,
+          fieldName
+        ).trim()
+      ).toBe('');
+    });
+  });
+
+  describe('HTML stripping of resolved values', () => {
+    it('strips HTML tags from item field values', () => {
+      const row = {
+        collection: 'content_headline',
+        item: { description: '<p data-start="258">Seamless connection</p>' },
+      };
+      expect(
+        renderM2ATemplate(
+          row,
+          '{{item:content_headline.description}}',
+          itemField,
+          discriminator,
+          fieldName
+        )
+      ).toBe('Seamless connection');
+    });
+
+    it('decodes entities in resolved values', () => {
+      const row = { collection: 'service', item: { name: 'Fix &amp; Flip' } };
+      expect(
+        renderM2ATemplate(row, '{{item:service.name}}', itemField, discriminator, fieldName)
+      ).toBe('Fix & Flip');
+    });
+
+    it('strips HTML from junction-level and parent-row tokens too', () => {
+      const row = { collection: 'service', item: {}, note: '<b>urgent</b>' };
+      const parentRow = { context: '<em>Q3</em>' };
+      expect(
+        renderM2ATemplate(
+          row,
+          '{{treatment.note}} {{context}}',
+          itemField,
+          discriminator,
+          fieldName,
+          parentRow
+        )
+      ).toBe('urgent Q3');
+    });
+
+    it('leaves plain text values untouched', () => {
+      const row = { collection: 'service', item: { name: 'Installation (DE)' } };
+      expect(
+        renderM2ATemplate(row, '{{item:service.name}}', itemField, discriminator, fieldName)
+      ).toBe('Installation (DE)');
     });
   });
 });

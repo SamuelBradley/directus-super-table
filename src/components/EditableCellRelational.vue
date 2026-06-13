@@ -193,13 +193,23 @@ import { isFieldEditable, getFieldEditWarning, getFieldSupportLevel } from '../u
 import { pickHeuristic, isM2A } from '../utils/displayHeuristics';
 import { resolveM2ARelation } from '../utils/resolveM2ARelation';
 import { buildM2ASegments, isBlockedSegment, type M2ASegment } from '../utils/buildM2ASegments';
+import { createDescribeHop } from '../utils/describeHop';
 import { resolveTranslationValue } from '../utils/resolveTranslationValue';
 import { usePermissions } from '../composables/usePermissions';
 
-const { useFieldsStore, useRelationsStore } = useStores();
+const { useFieldsStore, useRelationsStore, useUserStore } = useStores();
 const fieldsStore = useFieldsStore();
 const relationsStore = useRelationsStore();
 const permissions = usePermissions();
+const userStore = useUserStore?.();
+
+// Schema-aware hop resolver so M2A templates can reach deep relations
+// (e.g. translations stored inside the target collection).
+const describeHop = createDescribeHop(fieldsStore, relationsStore);
+
+// Default language for nested translations when a token carries no `:lang`
+// suffix: the current user's language (falls back to the first row).
+const defaultLanguage = (): string | null => (userStore as any)?.currentUser?.language ?? null;
 
 const props = defineProps<{
   item: Item;
@@ -427,7 +437,8 @@ const m2aSegments = computed<M2ASegment[]>(() => {
     m2a.discriminator,
     String(fieldName),
     props.item,
-    (c) => permissions.canRead(c)
+    (c) => permissions.canRead(c),
+    { describeHop, language: defaultLanguage() }
   );
 });
 

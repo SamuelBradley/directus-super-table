@@ -96,6 +96,28 @@ export function stripM2AFieldPrefix(token: string, fieldName: string): string {
   return token.startsWith(prefix) ? token.slice(prefix.length) : token;
 }
 
+/**
+ * Split an optional `:language` suffix off an M2A item path. The suffix selects
+ * a translation row (e.g. `translations.label:de-DE`) and is an extension-side
+ * convention — it must be stripped before the path is sent to the API, and used
+ * by the renderer to pick the language. Returns `language: null` when absent.
+ */
+export function splitLanguageSuffix(path: string): { path: string; language: string | null } {
+  const i = path.lastIndexOf(':');
+  if (i < 0) return { path, language: null };
+  return { path: path.slice(0, i), language: path.slice(i + 1) || null };
+}
+
+/**
+ * Strip an optional trailing `:language` suffix from a field key, returning
+ * just the path. Convenience wrapper over `splitLanguageSuffix(key).path` for
+ * the many "I only need the path" call sites (column keys carry at most one
+ * such suffix). A key without a suffix is returned unchanged.
+ */
+export function stripLanguageSuffix(key: string): string {
+  return splitLanguageSuffix(key).path;
+}
+
 interface RelationsStoreLike {
   getRelationsForField: (
     collection: string,

@@ -263,32 +263,38 @@ describe('adjustFieldsForDisplays — M2A (issue #60)', () => {
               return { field: f };
             if (col === 'service' && f === 'name') return { field: 'name' };
             if (col === 'orders' && f === 'code') return { field: 'code' };
+            if (col === 'catalog' && f === 'title') return { field: 'title' };
             return null;
           },
           getFieldsForCollection: () => [],
         }),
         useRelationsStore: () => ({
-          getRelationsForField: (col: string, f: string) =>
-            col === 'orders' && f === 'treatment'
-              ? [
-                  {
-                    collection: 'orders_treatment',
-                    field: 'orders_id',
-                    related_collection: 'orders',
-                    meta: { junction_field: 'item' },
+          getRelationsForField: (col: string, f: string) => {
+            if (col === 'orders' && f === 'treatment')
+              return [
+                {
+                  collection: 'orders_treatment',
+                  field: 'orders_id',
+                  related_collection: 'orders',
+                  meta: { junction_field: 'item' },
+                },
+                {
+                  collection: 'orders_treatment',
+                  field: 'item',
+                  related_collection: null,
+                  meta: {
+                    one_collection_field: 'collection',
+                    one_allowed_collections: ['partners_catalog', 'service'],
+                    junction_field: 'orders_id',
                   },
-                  {
-                    collection: 'orders_treatment',
-                    field: 'item',
-                    related_collection: null,
-                    meta: {
-                      one_collection_field: 'collection',
-                      one_allowed_collections: ['partners_catalog', 'service'],
-                      junction_field: 'orders_id',
-                    },
-                  },
-                ]
-              : [],
+                },
+              ];
+            if (col === 'partners_catalog' && f === 'catalog_id')
+              return [
+                { collection: 'partners_catalog', field: 'catalog_id', related_collection: 'catalog' },
+              ];
+            return [];
+          },
         }),
       }),
       useCollection: () => ({ primaryKeyField: { value: { field: 'id' } } }),

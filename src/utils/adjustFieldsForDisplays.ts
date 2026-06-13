@@ -10,9 +10,15 @@ import {
   buildM2AFieldPath,
   isM2APrefix,
   stripM2AFieldPrefix,
+  splitLanguageSuffix,
+  stripLanguageSuffix,
   M2A_COLLECTION_TOKEN,
 } from './displayHeuristics';
 import { resolveM2ARelation } from './resolveM2ARelation';
+import { createDescribeHop } from './describeHop';
+import { collectTranslationLanguagePaths } from './resolveRelationalPath';
+import { validateDeepPath } from './fieldValidity';
+import { warnOnce } from './warnOnce';
 
 /**
  * Helper function to get the related collection for a field
@@ -141,8 +147,11 @@ function getDisplayFieldsForRelation(
 }
 
 // Expands template tokens to API field paths. For M2M, traverses
-// junction_field to reach the target collection; drops tokens that don't
-// exist on the target. Translations skip validation (varying schemas).
+// junction_field to reach the target collection. Every emitted path is
+// walked per segment against the schema (validateDeepPath); invalid tokens
+// are dropped with a deduplicated warning. Translations skip validation
+// (varying schemas; rows arrive via the deep parameter and the renderer
+// tolerates missing leaves).
 export function expandTokensThroughRelation(
   field: { meta?: { special?: string[] } } | null,
   fieldKey: string,
@@ -159,6 +168,10 @@ export function expandTokensThroughRelation(
   if (isTranslations) {
     return tokens.map((tok) => `${fieldKey}.${tok}`);
   }
+
+  // Shared schema walker for every relational branch below. Creating it is a
+  // cheap closure factory; no store access happens until a hop is described.
+  const describeHop = createDescribeHop(fieldsStore, relationsStore);
 
   if (isM2A) {
     const m2a = resolveM2ARelation(parentCollection, fieldKey, relationsStore, fieldsStore);
@@ -184,13 +197,26 @@ export function expandTokensThroughRelation(
       // Per-collection item token: "item:collection.path".
       const parsed = parseM2AToken(tok);
       if (parsed && isM2APrefix(parsed.prefix, fieldKey, itemField)) {
-        const { collection: col, path } = parsed;
+        const { collection: col } = parsed;
+        // Drop the extension-only `:lang` suffix; the API path must not carry it
+        // (the renderer picks the translation language client-side).
+        const { path } = splitLanguageSuffix(parsed.path);
         if (allowedCollections.length > 0 && !allowedCollections.includes(col)) continue;
-        // Only the first path segment is validated against the target — deep
-        // leaves are unvalidated, matching the M2M/M2O branches below.
-        const firstSegment = (path.split('.')[0] ?? '') as string;
-        if (!fieldsStore.getField(col, firstSegment)) continue;
+        // Every segment is walked against the schema; an invalid deep leaf
+        // would otherwise reach the API, 403, and blank the whole view.
+        const validation = validateDeepPath(col, path, fieldsStore, describeHop);
+        if (!validation.valid) {
+          warnOnce(
+            `[super-layout-table] Dropped template field "item:${col}.${path}" (M2A item: ${validation.reason})`
+          );
+          continue;
+        }
         add(buildM2AFieldPath(fieldKey, itemField, col, path));
+        // For a translations hop, also fetch its language column so the renderer
+        // can match the active language instead of falling back to the first row.
+        for (const langPath of collectTranslationLanguagePaths(path, col, describeHop)) {
+          add(buildM2AFieldPath(fieldKey, itemField, col, langPath));
+        }
         continue;
       }
 
@@ -198,18 +224,36 @@ export function expandTokensThroughRelation(
       if (!firstSegment) continue;
 
       if (hadPrefix) {
-        // Junction-level field (e.g. `treatment.sort`); validate against the
-        // junction so an unknown token never reaches the API and 403s.
-        if (junctionCollection && fieldsStore.getField(junctionCollection, firstSegment)) {
-          add(`${fieldKey}.${tok}`);
+        // Junction-level field (e.g. `treatment.sort`); every segment is
+        // walked against the junction schema so an unknown deep token never
+        // reaches the API and 403s.
+        if (junctionCollection) {
+          const junctionValidation = validateDeepPath(
+            junctionCollection,
+            tok,
+            fieldsStore,
+            describeHop
+          );
+          if (junctionValidation.valid) {
+            add(`${fieldKey}.${tok}`);
+          } else {
+            warnOnce(
+              `[super-layout-table] Dropped template field "${rawTok}" (M2A junction "${junctionCollection}": ${junctionValidation.reason})`
+            );
+          }
         }
         continue;
       }
 
       // Bare token → parent-level field (e.g. `code`), fetched at the top level.
-      // Validated against the parent so a stray token is dropped, not 403'd.
-      if (fieldsStore.getField(parentCollection, firstSegment)) {
+      // Walked per segment against the parent so a stray token is dropped, not 403'd.
+      const parentValidation = validateDeepPath(parentCollection, tok, fieldsStore, describeHop);
+      if (parentValidation.valid) {
         add(tok);
+      } else {
+        warnOnce(
+          `[super-layout-table] Dropped template field "${tok}" (M2A parent "${parentCollection}": ${parentValidation.reason})`
+        );
       }
     }
     return expanded;
@@ -234,8 +278,20 @@ export function expandTokensThroughRelation(
       // so we don't double-prefix.
       const tokWithoutJunctionPrefix = parts[0] === junctionField ? parts.slice(1).join('.') : tok;
       if (!tokWithoutJunctionPrefix) continue;
-      const firstSegment = tokWithoutJunctionPrefix.split('.')[0]!;
-      if (!fieldsStore.getField(targetCollection, firstSegment)) continue;
+      // Every segment is walked against the target schema; an invalid deep
+      // leaf would otherwise reach the API, 403, and blank the whole view.
+      const validation = validateDeepPath(
+        targetCollection,
+        tokWithoutJunctionPrefix,
+        fieldsStore,
+        describeHop
+      );
+      if (!validation.valid) {
+        warnOnce(
+          `[super-layout-table] Dropped template field "${tok}" (M2M target "${targetCollection}": ${validation.reason})`
+        );
+        continue;
+      }
       expanded.push(`${fieldKey}.${junctionField}.${tokWithoutJunctionPrefix}`);
     }
     return expanded;
@@ -254,8 +310,15 @@ export function expandTokensThroughRelation(
 
   const expanded: string[] = [];
   for (const tok of tokens) {
-    const firstSegment = tok.includes('.') ? (tok.split('.')[0] as string) : tok;
-    if (!fieldsStore.getField(target, firstSegment)) continue;
+    // Every segment is walked against the related collection; an invalid deep
+    // leaf would otherwise reach the API, 403, and blank the whole view.
+    const validation = validateDeepPath(target, tok, fieldsStore, describeHop);
+    if (!validation.valid) {
+      warnOnce(
+        `[super-layout-table] Dropped template field "${tok}" (relation target "${target}": ${validation.reason})`
+      );
+      continue;
+    }
     expanded.push(`${fieldKey}.${tok}`);
   }
   return expanded;
@@ -306,7 +369,7 @@ export function adjustFieldsForDisplays(
       // (translations.title), but layoutQuery.fields entries can carry a language
       // suffix (translations.title:de-DE). Strip the suffix before lookup so a
       // single override applies to every language column for the same root field.
-      const storageKey = fieldKey.includes(':') ? fieldKey.split(':')[0] : fieldKey;
+      const storageKey = stripLanguageSuffix(fieldKey);
       const override = overrides[storageKey];
       if (override?.template) {
         const tokens = parseTemplateTokens(override.template);

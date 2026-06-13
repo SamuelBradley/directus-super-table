@@ -9,6 +9,8 @@ import {
   buildM2AFieldPath,
   isM2APrefix,
   stripM2AFieldPrefix,
+  splitLanguageSuffix,
+  stripLanguageSuffix,
 } from '@/utils/displayHeuristics';
 
 describe('isRelational', () => {
@@ -406,5 +408,38 @@ describe('stripM2AFieldPrefix', () => {
 
   it('returns the token unchanged when no field name is given', () => {
     expect(stripM2AFieldPrefix('treatment.collection', '')).toBe('treatment.collection');
+  });
+});
+
+describe('splitLanguageSuffix', () => {
+  it('splits a trailing :language off the path', () => {
+    expect(splitLanguageSuffix('translations.label:de-DE')).toEqual({
+      path: 'translations.label',
+      language: 'de-DE',
+    });
+  });
+
+  it('returns language null when there is no suffix', () => {
+    expect(splitLanguageSuffix('catalog_id.title')).toEqual({
+      path: 'catalog_id.title',
+      language: null,
+    });
+    expect(splitLanguageSuffix('name')).toEqual({ path: 'name', language: null });
+  });
+});
+
+describe('stripLanguageSuffix', () => {
+  it('returns the key unchanged when there is no suffix', () => {
+    expect(stripLanguageSuffix('title')).toBe('title');
+    expect(stripLanguageSuffix('translations.description')).toBe('translations.description');
+  });
+  it('strips a single trailing language suffix', () => {
+    expect(stripLanguageSuffix('translations.description:de-DE')).toBe('translations.description');
+  });
+  it('strips only the LAST colon segment (documents last-colon semantics)', () => {
+    expect(stripLanguageSuffix('a:b:de-DE')).toBe('a:b');
+  });
+  it('handles an empty trailing suffix', () => {
+    expect(stripLanguageSuffix('x:')).toBe('x');
   });
 });

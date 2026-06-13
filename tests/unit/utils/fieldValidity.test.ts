@@ -5,7 +5,9 @@ import {
   filterValidFields,
   filterValidSort,
   filterValidColumnDisplays,
+  validateDeepPath,
 } from '@/utils/fieldValidity';
+import type { DescribeHop, HopInfo } from '@/utils/resolveRelationalPath';
 
 const COLLECTION = 'issue_47_test';
 const KNOWN_FIELDS = new Set(['id', 'title', 'status', 'price', 'translations', 'tags']);
@@ -190,5 +192,87 @@ describe('filterValidColumnDisplays', () => {
   it('returns {} when collection is null', () => {
     const input = { title: { template: '{{title}}' } };
     expect(filterValidColumnDisplays(input, null, fieldsStore)).toEqual({});
+  });
+});
+
+describe('validateDeepPath', () => {
+  const makeDescribeHop =
+    (map: Record<string, HopInfo>): DescribeHop =>
+    (collection, field) =>
+      map[`${collection}.${field}`] ?? { kind: 'scalar' };
+
+  const deepFieldsStore = {
+    getField: (collection: string | null, field: string) =>
+      [
+        'service.translations',
+        'service.name',
+        'service.blocks',
+        'service.attachments',
+        'service_translations.label',
+      ].includes(`${collection}.${field}`)
+        ? { collection, field }
+        : null,
+  };
+  const describeHop = makeDescribeHop({
+    'service.translations': { kind: 'translations', relatedCollection: 'service_translations' },
+    'service.blocks': { kind: 'm2a', relatedCollection: null },
+    'service.attachments': { kind: 'files', relatedCollection: 'directus_files' },
+  });
+
+  it('accepts a valid multi-hop path', () => {
+    expect(validateDeepPath('service', 'translations.label', deepFieldsStore, describeHop)).toEqual(
+      { valid: true }
+    );
+  });
+
+  it('rejects an unknown leaf with a reason naming the resolved collection', () => {
+    const r = validateDeepPath('service', 'translations.missing', deepFieldsStore, describeHop);
+    expect(r.valid).toBe(false);
+    expect(r.reason).toContain('service_translations.missing');
+  });
+
+  it('rejects a scalar middle segment', () => {
+    const r = validateDeepPath('service', 'name.deeper', deepFieldsStore, describeHop);
+    expect(r.valid).toBe(false);
+    expect(r.reason).toContain('service.name');
+  });
+
+  it('rejects an unknown root segment and an empty path', () => {
+    expect(validateDeepPath('service', 'ghost.label', deepFieldsStore, describeHop).valid).toBe(
+      false
+    );
+    expect(validateDeepPath('service', '', deepFieldsStore, describeHop).valid).toBe(false);
+  });
+
+  it('skips $-virtual segments like the renderer does', () => {
+    expect(
+      validateDeepPath('service', 'translations.$thumbnail.label', deepFieldsStore, describeHop)
+        .valid
+    ).toBe(true);
+  });
+
+  it('stays permissive when a hop cannot be walked further (unknown related collection)', () => {
+    expect(validateDeepPath('service', 'blocks.title', deepFieldsStore, describeHop).valid).toBe(
+      true
+    );
+  });
+
+  it('stays permissive when the fields store throws mid-walk', () => {
+    const throwing = {
+      getField: (collection: string | null, field: string) => {
+        if (collection === 'service_translations') throw new Error('not hydrated');
+        return deepFieldsStore.getField(collection, field);
+      },
+    };
+    expect(validateDeepPath('service', 'translations.label', throwing, describeHop).valid).toBe(
+      true
+    );
+  });
+
+  it('stays permissive across a files hop (junction level is not walkable)', () => {
+    expect(
+      validateDeepPath('service', 'attachments.directus_files_id.title', deepFieldsStore, describeHop)
+        .valid
+    ).toBe(true);
   });
 });

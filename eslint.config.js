@@ -118,6 +118,7 @@ export default [
         clearTimeout: 'readonly',
         navigator: 'readonly',
         HTMLInputElement: 'readonly',
+        HTMLTextAreaElement: 'readonly',
         EventListener: 'readonly',
       },
     },
