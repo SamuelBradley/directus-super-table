@@ -1,4 +1,6 @@
-import { splitPathSegments, type DescribeHop } from './resolveRelationalPath';
+import { splitPathSegments, type DescribeHop, type HopKind } from './resolveRelationalPath';
+import { createDescribeHop } from './describeHop';
+import { stripLanguageSuffix } from './displayHeuristics';
 
 /** Hop kinds whose value is an array the server pages with its default limit. */
 const TO_MANY_KINDS = new Set(['o2m', 'm2m', 'm2a', 'files', 'translations']);
@@ -71,4 +73,78 @@ export function mergeNestedM2ADeep(
     };
   }
   return deepFields;
+}
+
+/**
+ * Store shapes buildDeep needs — only what `createDescribeHop` (and the
+ * first-level `getField`) consume; mirrors describeHop.ts's private interfaces.
+ */
+interface FieldsStoreLike {
+  getField: (
+    collection: string | null,
+    field: string
+  ) => { meta?: { special?: string[] | null } | null } | null;
+}
+interface RelationsStoreLike {
+  getRelationsForField: (
+    collection: string,
+    field: string
+  ) =>
+    | Array<{
+        collection?: string;
+        field?: string;
+        related_collection?: string | null;
+        meta?: { one_field?: string | null; junction_field?: string | null } | null;
+      }>
+    | null
+    | undefined;
+}
+
+/**
+ * Map a hop kind to its `deep` entry. A first-level to-many column renders ALL
+ * its rows joined (EditableCellRelational), so it is fetched unbounded
+ * (`_limit:-1`) — capping would silently truncate the displayed list; the same
+ * policy the nested builder applies via `TO_MANY_KINDS`. Trade-off: a column on
+ * a very large o2m/m2m relation fetches every row. To-one fetches all fields;
+ * scalar/unknown (incl. an unhydrated-store throw, self-heals on recompute)
+ * gets no entry.
+ */
+function deepEntryForKind(kind: HopKind): Record<string, any> | null {
+  if (TO_MANY_KINDS.has(kind)) return { _fields: ['*'], _limit: -1 };
+  if (kind === 'm2o' || kind === 'file') return { _fields: ['*'] };
+  return null;
+}
+
+/**
+ * Build the full `deep` parameter for the items request from ONE schema-driven
+ * classifier. First-level entries (one per visible relational field, keyed by
+ * its root segment) and the nested M2A entries are both derived via
+ * `describeHop`, so there is a single source of truth for how a field maps to
+ * its `deep` shape. `fields` are the raw visible columns; `expandedFields` are
+ * the display-expanded set that carries the M2A `item:collection.path` tokens.
+ * Returns undefined when no relational field needs a deep entry.
+ */
+export function buildDeep(
+  fields: readonly string[],
+  expandedFields: readonly string[],
+  collection: string | null,
+  fieldsStore: FieldsStoreLike,
+  relationsStore: RelationsStoreLike
+): Record<string, any> | undefined {
+  const describeHop = createDescribeHop(fieldsStore, relationsStore);
+  const deepFields: Record<string, any> = {};
+
+  for (const field of fields) {
+    const actualField = stripLanguageSuffix(field);
+    // Key on the root segment: `translations.label` and `translations.title`
+    // share one `translations` deep entry.
+    const rootField = actualField.includes('.') ? actualField.split('.')[0]! : actualField;
+    if (!rootField || !collection || deepFields[rootField]) continue;
+    const entry = deepEntryForKind(describeHop(collection, rootField).kind);
+    if (entry) deepFields[rootField] = entry;
+  }
+
+  mergeNestedM2ADeep(deepFields, buildNestedM2ADeep(expandedFields, describeHop));
+
+  return Object.keys(deepFields).length > 0 ? deepFields : undefined;
 }
