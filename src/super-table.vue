@@ -303,9 +303,8 @@ import {
   getTranslationLanguageFieldPath,
 } from './composables/useTranslationConfig';
 import { sanitizeFilter } from './utils/sanitizeFilter';
-import { buildNestedM2ADeep, mergeNestedM2ADeep } from './utils/buildNestedM2ADeep';
+import { buildDeep } from './utils/buildNestedM2ADeep';
 import { buildQueryFingerprint } from './utils/buildQueryFingerprint';
-import { createDescribeHop } from './utils/describeHop';
 import { createCoalescedRunner } from './utils/coalesce';
 import { PER_PAGE_OPTIONS } from './constants/pagination';
 import { DEFAULT_LANGUAGES } from './constants/languages';
@@ -809,66 +808,12 @@ const searchFilter = computed(() =>
   })
 );
 
-// Build deep parameter for relational fields
-const deep = computed(() => {
-  const deepFields: Record<string, any> = {};
-
-  fields.value.forEach((field: string) => {
-    // Remove language suffix if present
-    const actualField = stripLanguageSuffix(field);
-
-    // Handle dot-notation relational fields (like "user_created.first_name")
-    if (actualField.includes('.')) {
-      const parts = actualField.split('.');
-      const rootField = parts[0];
-
-      // For translations, we fetch all and filter client-side
-      if (rootField === 'translations') {
-        if (!deepFields[rootField]) {
-          deepFields[rootField] = {
-            _fields: ['*'], // Get all fields including languages_code
-            _limit: -1, // Get all translations for client-side filtering
-          };
-        }
-      } else {
-        // For other relations
-        if (!deepFields[rootField]) {
-          deepFields[rootField] = {
-            _fields: ['*'],
-          };
-        }
-      }
-    } else {
-      // Handle pure relational fields (like "image_data", "status_id", etc.)
-      // Check if this field is relational by looking at field metadata
-      const fieldMeta = fieldsStore.getField(collection.value, actualField);
-
-      const special = fieldMeta?.meta?.special ?? [];
-      if (
-        special.includes('m2o') ||
-        special.includes('o2m') ||
-        special.includes('m2m') ||
-        special.includes('m2a')
-      ) {
-        if (!deepFields[actualField]) {
-          deepFields[actualField] = special.includes('m2a')
-            ? { _fields: ['*'], _limit: -1 } // fetch every polymorphic row, not just the first page
-            : { _fields: ['*'] };
-        }
-      }
-    }
-  });
-
-  // Nested to-many relations inside expanded M2A item paths (e.g.
-  // treatment.item:service.translations) are not covered by the first-level
-  // entries above and would be capped at the server's default page size.
-  mergeNestedM2ADeep(
-    deepFields,
-    buildNestedM2ADeep(fieldsWithRelational.value, createDescribeHop(fieldsStore, relationsStore))
-  );
-
-  return Object.keys(deepFields).length > 0 ? deepFields : undefined;
-});
+// Build the `deep` parameter from a single schema-driven classifier. Two field
+// lists: `fields` drives the first-level entries, `fieldsWithRelational` carries
+// the display-expanded M2A item paths for the nested entries.
+const deep = computed(() =>
+  buildDeep(fields.value, fieldsWithRelational.value, collection.value, fieldsStore, relationsStore)
+);
 
 // Initialize filter presets composable with layoutOptions
 const {
@@ -914,21 +859,8 @@ async function handleQuickFilterSaved(event: any) {
   }
 }
 
-// Setup event listeners on mount
-onMounted(() => {
-  // Load presets from layoutOptions (no localStorage needed)
-  loadPresets();
-
-  // Load initial items
-  scheduleGetItems();
-
-  // Listen for save events from actions
-  window.addEventListener('quick-filter-saved', handleQuickFilterSaved);
-});
-
-onUnmounted(() => {
-  window.removeEventListener('quick-filter-saved', handleQuickFilterSaved);
-});
+// Initial load + the quick-filter-saved listener are registered in the single
+// consolidated onMounted/onUnmounted at the end of the script.
 
 // Update manual filters when props.filter changes (from native filter interface)
 watch(
@@ -1356,16 +1288,20 @@ function handleRefreshCollectionEvent(event: any) {
 }
 
 onMounted(() => {
+  // Initial load: presets first, then items.
+  loadPresets();
+  scheduleGetItems();
+
+  // All window listeners in one place; named handlers so onUnmounted removes the
+  // SAME references (inline arrows would make the removals silent no-ops).
+  window.addEventListener('quick-filter-saved', handleQuickFilterSaved);
   window.addEventListener('directus-items-duplicated', handleItemsDuplicated);
-
-  // Listen for Directus core delete events
   window.addEventListener('items-deleted', handleItemsDeletedEvent);
-
-  // Listen for collection refresh events
   window.addEventListener('refresh-collection', handleRefreshCollectionEvent);
 });
 
 onUnmounted(() => {
+  window.removeEventListener('quick-filter-saved', handleQuickFilterSaved);
   window.removeEventListener('directus-items-duplicated', handleItemsDuplicated);
   window.removeEventListener('items-deleted', handleItemsDeletedEvent);
   window.removeEventListener('refresh-collection', handleRefreshCollectionEvent);

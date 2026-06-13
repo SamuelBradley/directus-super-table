@@ -196,6 +196,8 @@ import { buildM2ASegments, isBlockedSegment, type M2ASegment } from '../utils/bu
 import { createDescribeHop } from '../utils/describeHop';
 import { resolveUserLanguage } from '../utils/resolveUserLanguage';
 import { resolveTranslationValue } from '../utils/resolveTranslationValue';
+import { renderBareTranslation } from '../utils/bareTranslationField';
+import { stripHtml } from '../utils/stripHtml';
 import { usePermissions } from '../composables/usePermissions';
 
 const { useFieldsStore, useRelationsStore, useUserStore } = useStores();
@@ -303,6 +305,21 @@ const displayValue = computed(() => {
       actualFieldKey.value,
       fieldLanguage.value ?? null,
       props.languageCodeField || 'languages_code'
+    );
+  }
+
+  // Bare `translations` column (no sub-field, no `:lang`): render the active-
+  // language row through the configured/heuristic template instead of raw JSON.
+  // (selectedLanguage is never passed to the cell, so the active language is
+  // effectively the current user's — `fieldLanguage` stays the first operand for
+  // consistency with the dotted-translations branch above.)
+  if (props.field?.meta?.special?.includes('translations') && !actualFieldKey.value.includes('.')) {
+    return renderBareTranslation(
+      props.item[actualFieldKey.value],
+      fieldLanguage.value ?? resolveUserLanguage(userStore),
+      props.languageCodeField || 'languages_code',
+      props.columnDisplays?.[storageKey.value]?.template,
+      (row, template) => stripHtml(renderTemplate(row, template))
     );
   }
 

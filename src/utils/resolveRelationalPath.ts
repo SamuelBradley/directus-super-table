@@ -118,7 +118,7 @@ export function collectTranslationLanguagePaths(
  * the detected language field), falling back to the first row when the language
  * is absent. Returns null for a non-array / empty value.
  */
-function pickTranslationRow(
+export function pickTranslationRow(
   value: unknown,
   language: string | null,
   languageField: string | null | undefined
