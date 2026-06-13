@@ -314,6 +314,36 @@ describe('renderM2ATemplate', () => {
         ).trim()
       ).toBe('');
     });
+
+    // Regression guard: the render path must pick the translation row via the
+    // DETECTED language field (here `lang`), not a hardcoded `languages_code`.
+    // A hardcode would miss every row and fall back to the first → wrong language.
+    it('honours the detected language field (lang) at render, not hardcoded languages_code', () => {
+      const langHop: DescribeHop = (collection, field) =>
+        collection === 'service' && field === 'translations'
+          ? { kind: 'translations', relatedCollection: 'service_translations', languageField: 'lang' }
+          : { kind: 'scalar' };
+      const langRow = {
+        collection: 'service',
+        item: {
+          translations: [
+            { lang: 'en-US', label: 'Maintenance (EN)' },
+            { lang: 'de-DE', label: 'Wartung (DE)' },
+          ],
+        },
+      };
+      expect(
+        renderM2ATemplate(
+          langRow,
+          '{{treatment.item:service.translations.label:de-DE}}',
+          itemField,
+          discriminator,
+          fieldName,
+          null,
+          { describeHop: langHop }
+        ).trim()
+      ).toBe('Wartung (DE)');
+    });
   });
 
   describe('HTML stripping of resolved values', () => {

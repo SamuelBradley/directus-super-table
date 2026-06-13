@@ -20,6 +20,9 @@ const SCHEMA: Record<string, HopInfo> = {
 
   'partners_catalog.catalog_id': { kind: 'm2o', relatedCollection: 'catalog' },
   'catalog.title': { kind: 'scalar' },
+  // A second M2O hop after catalog, so a pure M2O -> M2O -> scalar chain is covered.
+  'catalog.owner': { kind: 'm2o', relatedCollection: 'owner' },
+  'owner.name': { kind: 'scalar' },
   // A SECOND translations relation that uses a DIFFERENT language field name,
   // to prove we honour the detected field rather than hardcoding languages_code.
   'catalog.translations': {
@@ -51,6 +54,13 @@ describe('resolveRelationalPath', () => {
     expect(resolveRelationalPath(item, 'catalog_id.title', 'partners_catalog', describeHop, null)).toBe(
       'Premium'
     );
+  });
+
+  it('descends a pure M2O -> M2O -> scalar chain (catalog_id.owner.name)', () => {
+    const item = { catalog_id: { owner: { name: 'ACME' } } };
+    expect(
+      resolveRelationalPath(item, 'catalog_id.owner.name', 'partners_catalog', describeHop, null)
+    ).toBe('ACME');
   });
 
   it('picks the translation row matching the active language', () => {

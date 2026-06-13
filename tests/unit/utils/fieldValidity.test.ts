@@ -209,6 +209,10 @@ describe('validateDeepPath', () => {
         'service.blocks',
         'service.attachments',
         'service_translations.label',
+        // M2O -> M2O chain: service.owner -> owner.parent -> org.name
+        'service.owner',
+        'owner.parent',
+        'org.name',
       ].includes(`${collection}.${field}`)
         ? { collection, field }
         : null,
@@ -217,6 +221,8 @@ describe('validateDeepPath', () => {
     'service.translations': { kind: 'translations', relatedCollection: 'service_translations' },
     'service.blocks': { kind: 'm2a', relatedCollection: null },
     'service.attachments': { kind: 'files', relatedCollection: 'directus_files' },
+    'service.owner': { kind: 'm2o', relatedCollection: 'owner' },
+    'owner.parent': { kind: 'm2o', relatedCollection: 'org' },
   });
 
   it('accepts a valid multi-hop path', () => {
@@ -235,6 +241,18 @@ describe('validateDeepPath', () => {
     const r = validateDeepPath('service', 'name.deeper', deepFieldsStore, describeHop);
     expect(r.valid).toBe(false);
     expect(r.reason).toContain('service.name');
+  });
+
+  it('accepts a valid pure M2O -> M2O -> scalar chain (owner.parent.name)', () => {
+    expect(validateDeepPath('service', 'owner.parent.name', deepFieldsStore, describeHop)).toEqual({
+      valid: true,
+    });
+  });
+
+  it('rejects an invalid leaf after a two-hop M2O chain, naming the deepest collection', () => {
+    const r = validateDeepPath('service', 'owner.parent.ghost', deepFieldsStore, describeHop);
+    expect(r.valid).toBe(false);
+    expect(r.reason).toContain('org.ghost');
   });
 
   it('rejects an unknown root segment and an empty path', () => {
