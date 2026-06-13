@@ -5,6 +5,29 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.6.1 — Robustness & test hardening
+
+Follow-up to v0.6.0 (#68). No functional behavior change — internal hardening and
+additional unit coverage; verified with a live regression of the v0.6.0
+nested-translation feature.
+
+### Changed
+- **Fetch dedup is more robust.** The query fingerprint now canonicalizes nested
+  `filter`/`deep`/`alias` key order, so two semantically identical queries built
+  with a different key insertion order dedupe to a single request; array order
+  stays significant. The fingerprint is a dedup-only comparison key and never
+  forms the wire query. `sort` is normalized (`?? null`) consistently with the
+  other parameters.
+- **Single user-language helper.** The current user's language lookup for nested
+  translations is extracted into a pure, typed `resolveUserLanguage` helper and
+  reused at both call sites, removing duplicated untyped (`as any`) access.
+
+### Tests
+- Added coverage for the non-default translation language field at the render and
+  query-expansion levels, deep M2O chains (resolution and validation), the field
+  picker's single-file vs. to-many handling, the fingerprint canonicalization, and
+  the user-language helper (16 new unit tests).
+
 ## v0.6.0 — Deep relational paths in M2A templates (nested translations)
 
 ### Added
