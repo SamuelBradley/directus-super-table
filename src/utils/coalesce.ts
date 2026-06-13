@@ -29,6 +29,9 @@ export function createCoalescedRunner(fn: () => Promise<void> | void): () => Pro
     try {
       do {
         rerunRequested = false;
+        // Invariant: fn must not reject — a throw exits this loop and drops a
+        // rerunRequested set during the run. getItems catches its awaited fetch;
+        // the synchronous .value reads before it are treated as non-throwing.
         await fn();
       } while (rerunRequested);
     } finally {
