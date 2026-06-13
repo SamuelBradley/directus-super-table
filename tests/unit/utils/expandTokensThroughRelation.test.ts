@@ -346,6 +346,61 @@ describe('expandTokensThroughRelation', () => {
       meta: { special: ['m2a'] },
     } as any;
 
+    it('emits the translations companion using the detected junction_field (lang), not hardcoded languages_code', () => {
+      // A non-default M2A-target translations relation (junction_field 'lang').
+      // The existing companion tests all use 'languages_code' — which is also the
+      // hardcode default — so only a 'lang' fixture proves the companion column
+      // follows the DETECTED field through the full M2A expansion pipeline.
+      const { fieldsStore, relationsStore } = makeStores(
+        {
+          'service.translations': { field: 'translations', meta: { special: ['translations'] } },
+          'service_translations.label': { field: 'label' },
+          'service_translations.lang': { field: 'lang' },
+        },
+        {
+          'orders.treatment': [
+            {
+              collection: 'orders_treatment',
+              field: 'orders_id',
+              related_collection: 'orders',
+              meta: { junction_field: 'item' },
+            },
+            {
+              collection: 'orders_treatment',
+              field: 'item',
+              related_collection: null,
+              meta: {
+                one_collection_field: 'collection',
+                one_allowed_collections: ['service'],
+                junction_field: 'orders_id',
+              },
+            },
+          ],
+          'service.translations': [
+            {
+              collection: 'service_translations',
+              field: 'service_id',
+              related_collection: 'service',
+              meta: { one_field: 'translations', junction_field: 'lang' },
+            },
+          ],
+        }
+      );
+      const result = expandTokensThroughRelation(
+        m2aField,
+        'treatment',
+        'orders',
+        ['item:service.translations.label'],
+        fieldsStore as any,
+        relationsStore as any
+      );
+      expect(result).toEqual([
+        'treatment.collection',
+        'treatment.item:service.translations.label',
+        'treatment.item:service.translations.lang',
+      ]);
+    });
+
     it('expands per-collection item tokens and always emits the discriminator', () => {
       const { fieldsStore, relationsStore } = m2aStores();
       const result = expandTokensThroughRelation(

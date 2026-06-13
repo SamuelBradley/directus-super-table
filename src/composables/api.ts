@@ -50,6 +50,8 @@ export function useTableApi() {
         limit: options.limit || 100,
       };
       if (options.filter) params.filter = options.filter;
+      // The main listing path drives search through `filter` (intelligent _or);
+      // this `search` param stays for other callers (e.g. export).
       if (options.search) params.search = options.search;
       if (options.sort && options.sort.length > 0) params.sort = options.sort;
       if (options.deep) params.deep = options.deep;

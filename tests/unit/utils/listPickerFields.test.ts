@@ -36,6 +36,27 @@ describe('listPickerFields', () => {
     ]);
   });
 
+  it('treats a single file as drillable (directus_files) and omits to-many files/o2m', () => {
+    const fs = fieldsStore({
+      service: [{ field: 'cover', name: 'Cover' }, { field: 'gallery' }, { field: 'reviews' }],
+    });
+    const hop = makeDescribeHop({
+      'service.cover': { kind: 'file', relatedCollection: 'directus_files' },
+      'service.gallery': { kind: 'files', relatedCollection: 'directus_files' },
+      'service.reviews': { kind: 'o2m', relatedCollection: 'reviews' },
+    });
+    expect(listPickerFields('service', hop, fs)).toEqual([
+      {
+        field: 'cover',
+        label: 'Cover',
+        drillable: true,
+        relatedCollection: 'directus_files',
+        isTranslationsHop: false,
+      },
+      // 'gallery' (files) and 'reviews' (o2m) are to-many → omitted
+    ]);
+  });
+
   it('omits a relation without a related collection', () => {
     const fs = fieldsStore({ x: [{ field: 'blocks' }] });
     const hop = makeDescribeHop({ 'x.blocks': { kind: 'm2a', relatedCollection: null } });
