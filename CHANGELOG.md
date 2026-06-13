@@ -5,7 +5,7 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## v0.7.0 — Unified deep-build, lifecycle consolidation & bare-translation display
+## v0.6.2 — Unified deep-build, lifecycle consolidation & bare-translation display
 
 Follow-up to v0.6.1 (#70). Consolidates the `super-table.vue` orchestrator and
 unifies the `deep`-query construction onto a single schema-driven classifier.
