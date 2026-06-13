@@ -3,6 +3,7 @@ import {
   resolveRelationalPath,
   collectTranslationLanguagePaths,
   splitPathSegments,
+  pickTranslationRow,
   type HopInfo,
 } from '@/utils/resolveRelationalPath';
 
@@ -183,5 +184,32 @@ describe('splitPathSegments', () => {
   it('returns [] for an empty or all-virtual path', () => {
     expect(splitPathSegments('')).toEqual([]);
     expect(splitPathSegments('$thumbnail')).toEqual([]);
+  });
+});
+
+describe('pickTranslationRow', () => {
+  const rows = [
+    { languages_code: 'en-US', label: 'EN' },
+    { languages_code: 'de-DE', label: 'DE' },
+  ];
+
+  it('returns the row matching the active language', () => {
+    expect(pickTranslationRow(rows, 'de-DE', 'languages_code')).toBe(rows[1]);
+  });
+
+  it('falls back to the first row when the language is absent or null', () => {
+    expect(pickTranslationRow(rows, 'fr-FR', 'languages_code')).toBe(rows[0]);
+    expect(pickTranslationRow(rows, null, 'languages_code')).toBe(rows[0]);
+  });
+
+  it('honours a non-default language field', () => {
+    const r = [{ lang: 'de-DE', label: 'DE' }];
+    expect(pickTranslationRow(r, 'de-DE', 'lang')).toBe(r[0]);
+  });
+
+  it('returns null for a non-array, empty, or non-object first element', () => {
+    expect(pickTranslationRow(null, 'de-DE', 'languages_code')).toBeNull();
+    expect(pickTranslationRow([], 'de-DE', 'languages_code')).toBeNull();
+    expect(pickTranslationRow(['scalar'], null, 'languages_code')).toBeNull();
   });
 });
