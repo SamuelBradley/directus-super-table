@@ -5,6 +5,34 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.7.0 — Unified deep-build, lifecycle consolidation & bare-translation display
+
+Follow-up to v0.6.1 (#70). Consolidates the `super-table.vue` orchestrator and
+unifies the `deep`-query construction onto a single schema-driven classifier.
+
+### Changed (behavior)
+- **To-many relations are fetched completely.** First-level `o2m`/`m2m`/`files`
+  columns (and bare `translations`) are now fetched unbounded
+  (`deep[<field>][_limit]=-1`), consistent with the nested-M2A policy — previously
+  they were capped at the server's default page size (silently truncating the
+  displayed, comma-joined list) or not fetched at all. A column on a very large
+  to-many relation now fetches every row: the inherent cost of displaying it fully.
+- **`deep` is built by one schema-driven classifier** (`buildDeep`), so first-level
+  and nested entries share a single source of truth (`describeHop`). The previous
+  ad-hoc `special.includes(...)` first-level branch is gone.
+
+### Added
+- **Bare `translations` columns render the active-language value** instead of raw
+  JSON. The active-language row (current user's language, falling back to the first
+  available) is rendered through the column's configured template or a heuristic
+  field (`description`/`title`/…), with HTML stripped.
+
+### Internal
+- The two `onMounted`/`onUnmounted` blocks in `super-table.vue` are merged into a
+  single auditable pair; `pickTranslationRow` is exported for reuse. ~130 net lines
+  removed from the orchestrator. 431/431 unit tests, `vue-tsc`, ESLint, Prettier
+  all green; verified live across 13 collections + the M2A/translation flows.
+
 ## v0.6.1 — Robustness & test hardening
 
 Follow-up to v0.6.0 (#68). No functional behavior change — internal hardening and
