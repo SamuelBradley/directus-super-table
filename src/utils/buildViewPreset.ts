@@ -14,8 +14,7 @@ export interface ViewPreset {
   color: string | null;
 }
 
-// Builds a directus_presets payload from the current view, nesting layout state
-// under the layout id so it round-trips through the native bookmark machinery.
+// Nests layout state under the layout id so the preset round-trips through native bookmarks.
 export function buildViewPreset(ctx: ViewPresetContext, input: SaveViewInput): ViewPreset {
   return {
     collection: ctx.collection,

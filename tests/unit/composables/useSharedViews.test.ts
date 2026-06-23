@@ -66,6 +66,12 @@ describe('useSharedViews permission computeds', () => {
     expect(canSaveViews.value).toBe(false);
     expect(availableScopes.value).toEqual([]);
   });
+
+  it('omits the role scope for a share-user even if a role id is present', () => {
+    userStore.currentUser = { share: 'token-1', role: { id: 'r1' } };
+    const { availableScopes } = useSharedViews();
+    expect(availableScopes.value).toEqual(['me', 'all']);
+  });
 });
 
 describe('useSharedViews.saveView', () => {
