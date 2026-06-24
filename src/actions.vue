@@ -13,18 +13,6 @@
       <v-icon name="content_copy" />
     </v-button>
 
-    <!-- Save as Quick Filter Button - nur wenn native Filter gesetzt ist -->
-    <v-button
-      v-if="hasNativeFilter"
-      v-tooltip.bottom="'Save current filter as Quick Filter'"
-      icon
-      rounded
-      class="save-filter-button"
-      @click="openSaveFilterDialog"
-    >
-      <v-icon name="bookmark_add" />
-    </v-button>
-
     <!-- Save current view as a (personal or shared) bookmark -->
     <v-button
       v-if="canSaveViews"
@@ -35,6 +23,18 @@
       @click="openSaveViewDialog"
     >
       <v-icon name="bookmarks" />
+    </v-button>
+
+    <!-- Save as Quick Filter Button - nur wenn native Filter gesetzt ist -->
+    <v-button
+      v-if="hasNativeFilter"
+      v-tooltip.bottom="'Save current filter as Quick Filter'"
+      icon
+      rounded
+      class="save-filter-button"
+      @click="openSaveFilterDialog"
+    >
+      <v-icon name="bookmark_add" />
     </v-button>
 
     <!-- Save Filter Dialog -->
