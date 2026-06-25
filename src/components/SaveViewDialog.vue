@@ -85,6 +85,9 @@
                 :loading="targetsLoading"
                 placeholder="Select users"
               />
+              <v-notice v-if="usersTruncated" type="info">
+                Showing the first 500 users — type to search for a specific one.
+              </v-notice>
               <v-notice v-if="targetsError" type="warning">Could not load targets.</v-notice>
             </div>
           </div>
@@ -126,6 +129,7 @@ const {
   isLoading: targetsLoading,
   error: targetsError,
   load: loadTargets,
+  usersTruncated,
 } = useShareTargets();
 
 const saveViewDialogActive = ref(false);

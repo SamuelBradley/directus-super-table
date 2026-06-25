@@ -13,6 +13,7 @@ export function useShareTargets(): {
   isLoading: Ref<boolean>;
   error: Ref<string | null>;
   load: () => Promise<void>;
+  usersTruncated: Ref<boolean>;
 } {
   const api = useApi();
   const { useUserStore } = useStores();
@@ -22,10 +23,12 @@ export function useShareTargets(): {
   const users = ref<UserOption[]>([]);
   const isLoading = ref(false);
   const error = ref<string | null>(null);
+  const usersTruncated = ref(false);
 
   async function load(): Promise<void> {
     isLoading.value = true;
     error.value = null;
+    usersTruncated.value = false;
     try {
       const [roleRes, userRes] = await Promise.all([
         api.get(ROLES_ENDPOINT, { params: { fields: ['id', 'name'], limit: -1, sort: ['name'] } }),
@@ -41,7 +44,9 @@ export function useShareTargets(): {
         id: String(r.id),
         name: String(r.name ?? r.id),
       }));
-      users.value = ((userRes?.data?.data ?? []) as Array<Record<string, any>>)
+      const rawUsers = (userRes?.data?.data ?? []) as Array<Record<string, any>>;
+      usersTruncated.value = rawUsers.length >= USERS_LIMIT;
+      users.value = rawUsers
         .map((u) => {
           const full = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
           return {
@@ -61,5 +66,5 @@ export function useShareTargets(): {
     }
   }
 
-  return { roles, users, isLoading, error, load };
+  return { roles, users, isLoading, error, load, usersTruncated };
 }

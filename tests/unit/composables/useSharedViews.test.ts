@@ -198,6 +198,10 @@ describe('useSharedViews.saveView', () => {
     expect(notificationsStore.add).toHaveBeenCalledWith(
       expect.objectContaining({ text: expect.stringContaining('Bad Role') })
     );
+    // a 400 rejection adds an "invalid/gone" cause to the summary
+    expect(notificationsStore.add).toHaveBeenCalledWith(
+      expect.objectContaining({ text: expect.stringContaining('ungültig') })
+    );
   });
 
   it('scope "specific" reuses an existing sharedViewId for the same name', async () => {

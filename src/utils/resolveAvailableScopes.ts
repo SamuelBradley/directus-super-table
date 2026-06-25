@@ -1,6 +1,6 @@
 import type { ScopeAvailabilityInput, ViewScope } from '../types/sharedViews.types';
 
-// role/all gate on admin: the "own presets" rule is a validation constraint /permissions/me hides.
+// specific/all are admin-only: the "own presets" rule is a validation constraint /permissions/me hides.
 export function resolveAvailableScopes(input: ScopeAvailabilityInput): ViewScope[] {
   if (!input.canSave) return [];
   const scopes: ViewScope[] = ['me'];

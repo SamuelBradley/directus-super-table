@@ -30,28 +30,11 @@ export function useSharedViews(): {
   const { t } = useI18n();
   const api = useApi();
 
-  const isShareUser = computed(() => {
-    const user = userStore.currentUser;
-    return !!user && 'share' in user;
-  });
-
-  // role hydrates as a populated object {id} or a bare id string.
-  const myRoleId = computed<string | null>(() => {
-    const role = (userStore.currentUser as { role?: { id?: string } | string } | null)?.role;
-    if (typeof role === 'string') return role;
-    return role?.id ?? null;
-  });
-
   const canSaveViews = computed(() => permissionsStore.hasPermission(PRESETS_COLLECTION, 'create'));
   const canShareViews = computed(() => userStore.isAdmin === true);
 
   const availableScopes = computed<ViewScope[]>(() =>
-    resolveAvailableScopes({
-      canSave: canSaveViews.value,
-      canShare: canShareViews.value,
-      myRoleId: myRoleId.value,
-      isShareUser: isShareUser.value,
-    })
+    resolveAvailableScopes({ canSave: canSaveViews.value, canShare: canShareViews.value })
   );
 
   type Owner = { user: string | null; role: string | null };
@@ -195,9 +178,13 @@ export function useSharedViews(): {
         type: 'success',
       });
     } else {
+      const invalidTarget = results.some(
+        (r) => r.status === 'rejected' && r.reason?.response?.status === 400
+      );
+      const cause = invalidTarget ? ' (ein Ziel ist ungültig oder existiert nicht mehr)' : '';
       notificationsStore.add({
         title: t('error'),
-        text: `${okCount} von ${results.length} gespeichert. Fehlgeschlagen: ${failed.map(labelOf).join(', ')}`,
+        text: `${okCount} von ${results.length} gespeichert. Fehlgeschlagen: ${failed.map(labelOf).join(', ')}.${cause}`,
         type: 'error',
       });
     }

@@ -28,8 +28,6 @@ export interface ViewPresetContext {
 export interface ScopeAvailabilityInput {
   canSave: boolean;
   canShare: boolean;
-  myRoleId: string | null;
-  isShareUser: boolean;
 }
 
 export interface RoleOption {
