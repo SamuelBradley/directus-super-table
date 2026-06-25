@@ -1,7 +1,6 @@
 import type { RoleOption, ShareTarget, UserOption } from '../types/sharedViews.types';
 
-// Builds the share-target list; a user already covered by a selected role is skipped
-// so a recipient matched via role AND personally is not bookmarked twice.
+// Skips a user-target already covered by a selected role (avoids a double recipient bookmark).
 export function buildShareTargets(
   selectedRoleIds: string[],
   selectedUserIds: string[],
