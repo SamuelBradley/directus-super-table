@@ -228,6 +228,8 @@ import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { FilterPreset } from '../types/filter.types';
 import { Filter } from '@directus/types';
+import { getColorLabel, getColorValue } from '../utils/colors';
+import { fixIconMenuScroll } from '../utils/fixIconMenuScroll';
 
 interface Props {
   collection: string;
@@ -260,50 +262,6 @@ const { t } = useI18n();
 
 // Color options for the selector
 const colorOptions = ['primary', 'gray', 'success', 'warning', 'danger', 'info'];
-
-// Function to fix icon menu scrolling
-function fixIconMenuScroll() {
-  // Use multiple timeouts to catch the menu at different stages of rendering
-  const delays = [0, 50, 100, 200, 300];
-
-  delays.forEach((delay) => {
-    setTimeout(() => {
-      // Find all v-menu-content elements
-      const menus = document.querySelectorAll('.v-menu-content');
-
-      menus.forEach((menu) => {
-        // Check if this menu has icons (is an icon selector)
-        if (menu.querySelector('.icons')) {
-          const menuEl = menu as HTMLElement;
-
-          // Force the styles with inline style
-          menuEl.style.cssText = `
-            max-height: 400px !important;
-            overflow-y: auto !important;
-            overflow-x: hidden !important;
-          `;
-
-          // Also try setting via setAttribute for extra measure
-          menuEl.setAttribute('style', menuEl.style.cssText);
-        }
-      });
-
-      // Also try with the popper element
-      const poppers = document.querySelectorAll('.v-menu-popper');
-      poppers.forEach((popper) => {
-        const content = popper.querySelector('.v-menu-content');
-        if (content && content.querySelector('.icons')) {
-          const contentEl = content as HTMLElement;
-          contentEl.style.cssText = `
-            max-height: 400px !important;
-            overflow-y: auto !important;
-            overflow-x: hidden !important;
-          `;
-        }
-      });
-    }, delay);
-  });
-}
 
 // State
 const saveDialogActive = ref(false);
@@ -424,31 +382,6 @@ function updatePresetColor(preset: FilterPreset, color: string) {
   if (color !== preset.color) {
     emit('update-preset', preset, { color });
   }
-}
-
-// Helper functions for colors
-function getColorValue(colorName: string): string {
-  const colorMap: Record<string, string> = {
-    primary: 'var(--primary)',
-    gray: '#6c757d',
-    success: 'var(--success)',
-    warning: 'var(--warning)',
-    danger: 'var(--danger)',
-    info: 'var(--info)',
-  };
-  return colorMap[colorName] || 'var(--primary)';
-}
-
-function getColorLabel(colorName: string): string {
-  const labelMap: Record<string, string> = {
-    primary: 'Primary',
-    gray: 'Gray',
-    success: 'Success',
-    warning: 'Warning',
-    danger: 'Danger',
-    info: 'Info',
-  };
-  return labelMap[colorName] || 'Primary';
 }
 </script>
 

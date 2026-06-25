@@ -14,16 +14,15 @@
     </v-button>
 
     <!-- Save current view as a (personal or shared) bookmark -->
-    <v-button
-      v-if="canSaveViews"
-      v-tooltip.bottom="'Save current view'"
-      icon
-      rounded
-      class="save-view-button"
-      @click="openSaveViewDialog"
-    >
-      <v-icon name="bookmarks" />
-    </v-button>
+    <save-view-dialog
+      :collection="collection"
+      :filter="filter"
+      :search="search"
+      :layout-options="layoutOptions"
+      :layout-query="layoutQuery"
+      :can-save-views="canSaveViews"
+      :available-scopes="availableScopes"
+    />
 
     <!-- Save as Quick Filter Button - nur wenn native Filter gesetzt ist -->
     <v-button
@@ -100,73 +99,6 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
-
-    <!-- Save View Dialog -->
-    <v-dialog
-      v-if="saveViewDialogActive"
-      :model-value="saveViewDialogActive"
-      @update:model-value="saveViewDialogActive = $event"
-      @esc="saveViewDialogActive = false"
-      persistent
-    >
-      <v-card>
-        <v-card-title>Save current view</v-card-title>
-        <v-card-text>
-          <div class="form-grid" @click.stop>
-            <div class="full-width">
-              <v-input
-                v-model="viewName"
-                placeholder="View name (e.g. Team overview)"
-                autofocus
-                @keydown.enter="submitSaveView"
-                @click.stop
-              />
-            </div>
-
-            <div class="full-width" @click.stop>
-              <label class="field-label">Icon (optional)</label>
-              <interface-select-icon
-                :value="viewIcon"
-                @input="viewIcon = $event"
-                @click.stop="fixIconMenuScroll"
-              />
-            </div>
-
-            <div class="full-width" @click.stop>
-              <label class="field-label">Color (optional)</label>
-              <div class="color-selector" @click.stop>
-                <div
-                  v-for="option in colorOptions"
-                  :key="option.value"
-                  :class="['color-circle', { active: viewColor === option.value }]"
-                  :style="{ backgroundColor: getColorValue(option.value) }"
-                  :title="option.text"
-                  @click.stop="viewColor = viewColor === option.value ? null : option.value"
-                >
-                  <v-icon v-if="viewColor === option.value" name="check" small class="check-icon" />
-                </div>
-              </div>
-              <div class="color-label">{{ viewColor ? getColorLabel(viewColor) : 'None' }}</div>
-            </div>
-
-            <div v-if="scopeItems.length > 1" class="full-width" @click.stop>
-              <label class="field-label">Visible to</label>
-              <v-select v-model="viewScope" :items="scopeItems" />
-            </div>
-          </div>
-        </v-card-text>
-        <v-card-actions>
-          <v-button secondary @click="saveViewDialogActive = false">Cancel</v-button>
-          <v-button
-            :loading="savingView"
-            :disabled="!viewName || savingView"
-            @click="submitSaveView"
-          >
-            Save
-          </v-button>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
   </div>
 </template>
 
@@ -177,7 +109,9 @@ import { useI18n } from 'vue-i18n';
 import { useTableApi } from './composables/api';
 import { usePermissions } from './composables/usePermissions';
 import { useSharedViews } from './composables/useSharedViews';
-import type { ViewScope } from './types/sharedViews.types';
+import SaveViewDialog from './components/SaveViewDialog.vue';
+import { colorOptions, getColorLabel, getColorValue } from './utils/colors';
+import { fixIconMenuScroll } from './utils/fixIconMenuScroll';
 
 // Props from layout state
 const props = defineProps<{
@@ -200,72 +134,13 @@ const tableApi = useTableApi();
 const { useNotificationsStore } = useStores();
 const notificationsStore = useNotificationsStore();
 const permissions = usePermissions();
-const { canSaveViews, availableScopes, saveView } = useSharedViews();
-
-const SCOPE_LABELS: Record<ViewScope, string> = {
-  me: 'Just me',
-  role: 'My role',
-  all: 'Everyone',
-};
-const scopeItems = computed(() =>
-  availableScopes.value.map((scope) => ({ text: SCOPE_LABELS[scope], value: scope }))
-);
-
-const saveViewDialogActive = ref(false);
-const viewName = ref('');
-const viewIcon = ref('bookmark');
-const viewColor = ref<string | null>(null);
-const viewScope = ref<ViewScope>('me');
-const savingView = ref(false);
-
-function openSaveViewDialog() {
-  viewName.value = '';
-  viewIcon.value = 'bookmark';
-  viewColor.value = null;
-  viewScope.value = 'me';
-  saveViewDialogActive.value = true;
-}
-
-async function submitSaveView() {
-  if (!viewName.value || savingView.value) return;
-  savingView.value = true;
-  try {
-    const ok = await saveView(
-      {
-        name: viewName.value,
-        icon: viewIcon.value,
-        color: viewColor.value,
-        scope: viewScope.value,
-      },
-      {
-        collection: props.collection,
-        layoutOptions: props.layoutOptions,
-        layoutQuery: props.layoutQuery,
-        filter: props.filter,
-        search: props.search,
-      }
-    );
-    if (ok) saveViewDialogActive.value = false;
-  } finally {
-    savingView.value = false;
-  }
-}
+const { canSaveViews, availableScopes } = useSharedViews();
 
 // State for Save Filter Dialog
 const saveDialogActive = ref(false);
 const filterName = ref('');
 const filterIcon = ref('filter_list');
 const filterColor = ref('primary');
-
-// Color options for filter buttons
-const colorOptions = [
-  { text: 'Primary (Blue)', value: 'primary' },
-  { text: 'Gray', value: 'gray' },
-  { text: 'Success (Green)', value: 'success' },
-  { text: 'Warning (Orange)', value: 'warning' },
-  { text: 'Danger (Red)', value: 'danger' },
-  { text: 'Info (Light Blue)', value: 'info' },
-];
 
 const hasSelection = computed(() => props.selection && props.selection.length > 0);
 const hasNativeFilter = computed(() => {
@@ -329,51 +204,6 @@ const duplicateTooltip = computed(() => {
   const count = props.selection?.length || 0;
   return count === 1 ? 'Duplicate item' : `Duplicate ${count} items`;
 });
-
-// Helper functions for color selector
-function getColorValue(colorName: string): string {
-  const colorMap: Record<string, string> = {
-    primary: 'var(--primary)',
-    gray: '#6c757d', // Bootstrap gray - works in both light and dark themes
-    success: 'var(--success)',
-    warning: 'var(--warning)',
-    danger: 'var(--danger)',
-    info: 'var(--info)',
-  };
-  return colorMap[colorName] || 'var(--primary)';
-}
-
-function getColorLabel(colorName: string): string {
-  const option = colorOptions.find((opt) => opt.value === colorName);
-  return option ? option.text : 'Primary (Blue)';
-}
-
-// Function to fix icon menu scrolling
-function fixIconMenuScroll() {
-  // Use multiple timeouts to catch the menu at different stages of rendering
-  const delays = [0, 50, 100, 200, 300];
-
-  delays.forEach((delay) => {
-    setTimeout(() => {
-      // Find all v-menu-content elements
-      const menus = document.querySelectorAll('.v-menu-content');
-
-      menus.forEach((menu) => {
-        // Check if this menu has icons (is an icon selector)
-        if (menu.querySelector('.icons')) {
-          const menuEl = menu as HTMLElement;
-
-          // Force the styles with inline style
-          menuEl.style.cssText = `
-            max-height: 400px !important;
-            overflow-y: auto !important;
-            overflow-x: hidden !important;
-          `;
-        }
-      });
-    }, delay);
-  });
-}
 
 // Methods
 function openSaveFilterDialog() {
