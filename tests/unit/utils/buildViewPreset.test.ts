@@ -42,7 +42,7 @@ describe('buildViewPreset', () => {
       name: 'X',
       icon: 'star',
       color: 'primary',
-      scope: 'role',
+      scope: 'me',
     });
     expect(result.icon).toBe('star');
     expect(result.color).toBe('primary');
