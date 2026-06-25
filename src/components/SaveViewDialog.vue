@@ -104,7 +104,8 @@
 import { computed, ref } from 'vue';
 import { useSharedViews } from '../composables/useSharedViews';
 import { useShareTargets } from '../composables/useShareTargets';
-import type { SaveViewInput, ShareTarget, ViewScope } from '../types/sharedViews.types';
+import type { SaveViewInput, ViewScope } from '../types/sharedViews.types';
+import { buildShareTargets } from '../utils/buildShareTargets';
 import { colorOptions, getColorLabel, getColorValue } from '../utils/colors';
 import { fixIconMenuScroll } from '../utils/fixIconMenuScroll';
 
@@ -180,19 +181,15 @@ async function submitSaveView() {
     const scope = viewScope.value;
     let input: SaveViewInput;
     if (scope === 'specific') {
-      const roleName = (id: string) => roles.value.find((r) => r.id === id)?.name;
-      const userName = (id: string) => users.value.find((u) => u.id === id)?.name;
       input = {
         ...base,
         scope: 'specific',
-        targets: [
-          ...selectedRoleIds.value.map(
-            (id): ShareTarget => ({ kind: 'role', id, label: roleName(id) })
-          ),
-          ...selectedUserIds.value.map(
-            (id): ShareTarget => ({ kind: 'user', id, label: userName(id) })
-          ),
-        ],
+        targets: buildShareTargets(
+          selectedRoleIds.value,
+          selectedUserIds.value,
+          roles.value,
+          users.value
+        ),
       };
     } else {
       input = { ...base, scope };

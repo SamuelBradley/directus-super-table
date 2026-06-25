@@ -31,7 +31,7 @@ export function useShareTargets(): {
         api.get(ROLES_ENDPOINT, { params: { fields: ['id', 'name'], limit: -1, sort: ['name'] } }),
         api.get(USERS_ENDPOINT, {
           params: {
-            fields: ['id', 'first_name', 'last_name', 'email'],
+            fields: ['id', 'first_name', 'last_name', 'email', 'role'],
             limit: USERS_LIMIT,
             sort: ['first_name', 'last_name'],
           },
@@ -48,6 +48,7 @@ export function useShareTargets(): {
             id: String(u.id),
             name: full || u.email || String(u.id),
             email: u.email ?? null,
+            role: u.role != null ? String(u.role) : null,
           };
         })
         .filter((u) => u.id !== currentUserId); // never offer the current user as a share target

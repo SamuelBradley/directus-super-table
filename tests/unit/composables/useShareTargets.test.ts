@@ -19,13 +19,15 @@ describe('useShareTargets.load', () => {
       url === '/roles'
         ? Promise.resolve({ data: { data: [{ id: 'r1', name: 'Editor' }] } })
         : Promise.resolve({
-            data: { data: [{ id: 'u1', first_name: 'Anna', last_name: 'M', email: 'a@x.io' }] },
+            data: {
+              data: [{ id: 'u1', first_name: 'Anna', last_name: 'M', email: 'a@x.io', role: 'r9' }],
+            },
           })
     );
     const { roles, users, load, isLoading, error } = useShareTargets();
     await load();
     expect(roles.value).toEqual([{ id: 'r1', name: 'Editor' }]);
-    expect(users.value).toEqual([{ id: 'u1', name: 'Anna M', email: 'a@x.io' }]);
+    expect(users.value).toEqual([{ id: 'u1', name: 'Anna M', email: 'a@x.io', role: 'r9' }]);
     expect(isLoading.value).toBe(false);
     expect(error.value).toBeNull();
   });
@@ -47,7 +49,7 @@ describe('useShareTargets.load', () => {
     );
     const { users, load } = useShareTargets();
     await load();
-    expect(users.value).toEqual([{ id: 'u2', name: 'b@x.io', email: 'b@x.io' }]);
+    expect(users.value).toEqual([{ id: 'u2', name: 'b@x.io', email: 'b@x.io', role: null }]);
   });
 
   it('excludes the current user from the users list (no self-sharing)', async () => {
@@ -65,6 +67,6 @@ describe('useShareTargets.load', () => {
     );
     const { users, load } = useShareTargets();
     await load();
-    expect(users.value).toEqual([{ id: 'u9', name: 'Other', email: 'o@x.io' }]);
+    expect(users.value).toEqual([{ id: 'u9', name: 'Other', email: 'o@x.io', role: null }]);
   });
 });
