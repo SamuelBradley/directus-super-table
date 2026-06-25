@@ -3,7 +3,7 @@ import { reactive } from 'vue';
 
 // Reactive mocks so the composable's computeds re-evaluate regardless of the
 // order in which a test mutates the mock vs. constructs the composable.
-const presetsStore = { create: vi.fn(), savePreset: vi.fn(), update: vi.fn() };
+const presetsStore = { create: vi.fn(), savePreset: vi.fn(), update: vi.fn(), hydrate: vi.fn() };
 const userStore = reactive<{ currentUser: any; isAdmin: boolean }>({
   currentUser: { id: 'u1', role: { id: 'r1' } },
   isAdmin: true,
@@ -154,6 +154,8 @@ describe('useSharedViews.saveView', () => {
     expect(userCall.layout_options['super-layout-table'].sharedViewId).toBe(gid);
     // no navigation for specific
     expect(routerPush).not.toHaveBeenCalled();
+    // nav is refreshed so outward-shared rows don't linger optimistically
+    expect(presetsStore.hydrate).toHaveBeenCalled();
   });
 
   it('scope "specific" updates an existing same-name preset instead of creating (upsert)', async () => {

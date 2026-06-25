@@ -201,6 +201,12 @@ export function useSharedViews(): {
         type: 'error',
       });
     }
+    // refresh the nav so outward-shared rows don't linger optimistically in the sharer's list
+    try {
+      await presetsStore.hydrate();
+    } catch {
+      // best-effort — a reload reconciles the list anyway
+    }
     return okCount > 0;
   }
 
