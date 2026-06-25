@@ -143,9 +143,7 @@ export function useSharedViews(): {
       text:
         status === 403
           ? 'You do not have permission to save a shared view'
-          : status === 400
-            ? 'A selected target is invalid or no longer exists'
-            : error?.message || 'Failed to save view',
+          : error?.message || 'Failed to save view',
       type: 'error',
     });
   }

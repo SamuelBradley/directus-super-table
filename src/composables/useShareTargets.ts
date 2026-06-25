@@ -6,8 +6,7 @@ const ROLES_ENDPOINT = '/roles';
 const USERS_ENDPOINT = '/users';
 const USERS_LIMIT = 500;
 
-// Loads the roles/users the current user may read (admins: all; restricted: a 403
-// yields empty lists). Exposes raw domain objects so the dialog owns formatting.
+// Loads roles/users the current user may read (403 → empty); raw objects, dialog formats.
 export function useShareTargets(): {
   roles: Ref<RoleOption[]>;
   users: Ref<UserOption[]>;
