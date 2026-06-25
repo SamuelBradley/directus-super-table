@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const get = vi.fn();
-vi.mock('@directus/extensions-sdk', () => ({ useApi: () => ({ get }) }));
+const userStore = { currentUser: { id: 'me-id' } };
+vi.mock('@directus/extensions-sdk', () => ({
+  useApi: () => ({ get }),
+  useStores: () => ({ useUserStore: () => userStore }),
+}));
 
 import { useShareTargets } from '../../../src/composables/useShareTargets';
 
@@ -44,5 +48,23 @@ describe('useShareTargets.load', () => {
     const { users, load } = useShareTargets();
     await load();
     expect(users.value).toEqual([{ id: 'u2', name: 'b@x.io', email: 'b@x.io' }]);
+  });
+
+  it('excludes the current user from the users list (no self-sharing)', async () => {
+    get.mockImplementation((url: string) =>
+      url === '/roles'
+        ? Promise.resolve({ data: { data: [] } })
+        : Promise.resolve({
+            data: {
+              data: [
+                { id: 'me-id', first_name: 'Me', last_name: '', email: 'me@x.io' },
+                { id: 'u9', first_name: 'Other', last_name: '', email: 'o@x.io' },
+              ],
+            },
+          })
+    );
+    const { users, load } = useShareTargets();
+    await load();
+    expect(users.value).toEqual([{ id: 'u9', name: 'Other', email: 'o@x.io' }]);
   });
 });

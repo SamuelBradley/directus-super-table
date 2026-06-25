@@ -1,5 +1,5 @@
 import { ref, type Ref } from 'vue';
-import { useApi } from '@directus/extensions-sdk';
+import { useApi, useStores } from '@directus/extensions-sdk';
 import type { RoleOption, UserOption } from '../types/sharedViews.types';
 
 const ROLES_ENDPOINT = '/roles';
@@ -15,6 +15,9 @@ export function useShareTargets(): {
   load: () => Promise<void>;
 } {
   const api = useApi();
+  const { useUserStore } = useStores();
+  const me = useUserStore()?.currentUser;
+  const currentUserId: string | null = me?.id != null ? String(me.id) : null;
   const roles = ref<RoleOption[]>([]);
   const users = ref<UserOption[]>([]);
   const isLoading = ref(false);
@@ -38,10 +41,16 @@ export function useShareTargets(): {
         id: String(r.id),
         name: String(r.name ?? r.id),
       }));
-      users.value = ((userRes?.data?.data ?? []) as Array<Record<string, any>>).map((u) => {
-        const full = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
-        return { id: String(u.id), name: full || u.email || String(u.id), email: u.email ?? null };
-      });
+      users.value = ((userRes?.data?.data ?? []) as Array<Record<string, any>>)
+        .map((u) => {
+          const full = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
+          return {
+            id: String(u.id),
+            name: full || u.email || String(u.id),
+            email: u.email ?? null,
+          };
+        })
+        .filter((u) => u.id !== currentUserId); // never offer the current user as a share target
     } catch (e: any) {
       roles.value = [];
       users.value = [];
