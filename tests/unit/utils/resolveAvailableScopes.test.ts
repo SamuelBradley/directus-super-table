@@ -14,21 +14,21 @@ describe('resolveAvailableScopes', () => {
     ).toEqual(['me']);
   });
 
-  it('returns me, role, all for an admin with a role', () => {
+  it('returns me, specific, all for an admin who can share', () => {
     expect(
       resolveAvailableScopes({ canSave: true, canShare: true, myRoleId: 'r1', isShareUser: false })
-    ).toEqual(['me', 'role', 'all']);
+    ).toEqual(['me', 'specific', 'all']);
   });
 
-  it('omits role when the admin has no role id', () => {
+  it('returns me, specific, all for an admin even without a role id', () => {
     expect(
       resolveAvailableScopes({ canSave: true, canShare: true, myRoleId: null, isShareUser: false })
-    ).toEqual(['me', 'all']);
+    ).toEqual(['me', 'specific', 'all']);
   });
 
-  it('omits role for a share-user even if a role id is present', () => {
+  it('returns me, specific, all for a share-user admin (specific is not role-derived)', () => {
     expect(
       resolveAvailableScopes({ canSave: true, canShare: true, myRoleId: 'r1', isShareUser: true })
-    ).toEqual(['me', 'all']);
+    ).toEqual(['me', 'specific', 'all']);
   });
 });

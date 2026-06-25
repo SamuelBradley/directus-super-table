@@ -4,7 +4,7 @@ import type { ScopeAvailabilityInput, ViewScope } from '../types/sharedViews.typ
 export function resolveAvailableScopes(input: ScopeAvailabilityInput): ViewScope[] {
   if (!input.canSave) return [];
   const scopes: ViewScope[] = ['me'];
-  if (input.canShare && input.myRoleId && !input.isShareUser) scopes.push('role');
+  if (input.canShare) scopes.push('specific');
   if (input.canShare) scopes.push('all');
   return scopes;
 }

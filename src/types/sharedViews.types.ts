@@ -1,13 +1,21 @@
-// Shared types for the "save current view as a (possibly shared) bookmark" feature.
+// Shared types for saving the current view as one or more (possibly shared) bookmarks.
 
-export type ViewScope = 'me' | 'role' | 'all';
+export type ViewScope = 'me' | 'all' | 'specific';
 
-export interface SaveViewInput {
+// A single share target. 'label' is the display name (for notifications); 'policy' addable later.
+export type ShareTarget =
+  | { kind: 'role'; id: string; label?: string }
+  | { kind: 'user'; id: string; label?: string };
+
+interface BaseViewInput {
   name: string;
   icon?: string;
   color?: string | null;
-  scope: ViewScope;
 }
+
+export type SaveViewInput =
+  | (BaseViewInput & { scope: 'me' | 'all' })
+  | (BaseViewInput & { scope: 'specific'; targets: ShareTarget[] });
 
 export interface ViewPresetContext {
   collection: string;
@@ -22,4 +30,15 @@ export interface ScopeAvailabilityInput {
   canShare: boolean;
   myRoleId: string | null;
   isShareUser: boolean;
+}
+
+export interface RoleOption {
+  id: string;
+  name: string;
+}
+
+export interface UserOption {
+  id: string;
+  name: string;
+  email: string | null;
 }
