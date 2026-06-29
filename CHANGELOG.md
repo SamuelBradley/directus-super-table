@@ -5,6 +5,44 @@ All notable changes to the Super Layout Table Extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.6.4 — Shared Views (save & share the current view)
+
+Implements #41. Save the current Super Table view as a native Directus bookmark
+and share it with specific roles and/or users.
+
+### Added
+- **Save the current view as a (shareable) bookmark.** A "Save view" button in the
+  layout header opens a dialog that saves the current table configuration (columns,
+  filters, sort, search, icon, color) as a native preset. Visibility scopes:
+  **Just me**, **Everyone**, or **Specific targets**.
+- **Multi-target sharing.** "Specific targets" lets an admin share a view with
+  multiple roles AND/OR individual users in one save. Each target becomes its own
+  native `directus_presets` row, **upserted** (re-saving the same name updates
+  instead of duplicating), grouped by a stable `sharedViewId` for future
+  management. Permission-aware role/user pickers; partial-failure reporting.
+- Sharing is **admin-only** (gated on `isAdmin` plus the server's own validation);
+  non-admins only ever see "Just me".
+
+### Fixed
+- The current user is excluded from the share-target list (no pointless self-share
+  duplicates in the sharer's own bookmark list).
+- After a multi-target share, foreign-owner rows no longer linger in the sharer's
+  navigation until reload (the presets store re-hydrates).
+- A recipient covered by both a selected role **and** an individual target is now
+  bookmarked once, not twice (redundant user targets are skipped).
+
+### Compatibility
+- Declares support for **Directus 11 and 12** (`host: "^11.0.0 || ^12.0.0"`).
+  Verified live: loads, renders, and operates on both Directus 11.11.0 and
+  Directus 12.0.2 with no runtime errors.
+
+### Internal
+- Loading/switching stays 100% native (Directus bookmark navigation); all writes go
+  through the native `presetsStore`. New `useShareTargets` / `useSharedViews`
+  composables, a `SaveViewDialog` component, and pure `buildViewPreset` /
+  `resolveAvailableScopes` / `buildShareTargets` utils. Dev/tooling dependencies
+  updated within ranges. 465 unit tests; `vue-tsc`, ESLint and Prettier green.
+
 ## v0.6.3 — Open rows in a new tab (Ctrl/Cmd+click)
 
 Implements #72. Table rows can be opened in a new browser tab, matching the
