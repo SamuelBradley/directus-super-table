@@ -1,6 +1,8 @@
 /node_modules/
 /dist/
 /index.js
+# Local pnpm build-script approvals (per-environment, run `pnpm approve-builds`; not committed)
+/pnpm-workspace.yaml
 claude.md
 /playwright-tools/
 /screenshots/

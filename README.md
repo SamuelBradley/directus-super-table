@@ -9,7 +9,7 @@
 ![Prettier](https://img.shields.io/badge/code%20style-prettier-ff69b4)
 ![Directus](https://img.shields.io/badge/Directus-v11+-00B896)
 
-A powerful and feature-rich table layout extension for Directus 11+ that enhances the default table view with advanced functionality including inline editing, quick filters, bookmarks, and custom cell rendering.
+A powerful and feature-rich table layout extension for Directus 11 and 12 that enhances the default table view with advanced functionality including inline editing, quick filters, shareable saved views, and custom cell rendering.
 
 
 ![Super Table Demo](https://raw.githubusercontent.com/smartlabsAT/directus-super-table/main/demo/super-table-demo.gif)
@@ -26,6 +26,9 @@ Rename table columns on-the-fly without changing the underlying field names. Cre
 
 ### 🎨 Quick Filters with Colors & Icons
 Create custom filter buttons with personalized colors and icons for instant data filtering. Visual organization at its best.
+
+### 🔖 Saved & Shared Views
+Save the current table view (columns, filters, sort, search) as a native bookmark — and, as an admin, share it with **specific roles and/or users** in one step (or with everyone). Recipients get the exact same view in their own navigation.
 
 ### 🔍 Global Table Search
 Powerful search functionality across all table fields, including nested relations and translations. Find anything, anywhere in your data.
@@ -204,6 +207,14 @@ Save table configurations for quick access:
 3. **Update Bookmark**: Load bookmark, make changes, save with same name
 4. **Delete Bookmark**: Right-click bookmark and select delete
 
+### Shared Views (Save & Share)
+Save the current view and choose who can see it:
+
+1. **Save view**: Click the **Save view** button in the header → name it, optionally pick an icon/color, and choose a scope.
+2. **Scopes**: **Just me** (personal), **Everyone** (global), or **Specific targets** (admins only) — select any number of **roles** and/or **users** to share with.
+3. **Re-saving** the same name updates the shared view in place (no duplicates).
+4. **Visibility**: each recipient sees the shared view once in their own bookmark navigation. Non-admins only ever see the "Just me" option.
+
 ## Project Structure
 
 ```
@@ -241,7 +252,7 @@ super-layout-table/
 ### Prerequisites
 - Node.js 20+ (CI runs on 20.x and 22.x)
 - pnpm package manager
-- Directus 11.0.0+
+- Directus 11 and 12 (verified on 11.11.0 and 12.0.2)
 
 ### Setup Development Environment
 ```bash
