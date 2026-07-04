@@ -462,7 +462,8 @@ export function adjustFieldsForDisplays(
       if (field.meta?.display === null) return fieldKey;
 
       // Get the display definition - this is where the magic happens!
-      const displayId = field.meta?.display || (isSystemUserAuditField(field, fieldKey) ? 'user' : null);
+      const displayId =
+        field.meta?.display || (isSystemUserAuditField(field, fieldKey) ? 'user' : null);
       if (!displayId) return fieldKey;
 
       // Get display-specific fields based on display type
