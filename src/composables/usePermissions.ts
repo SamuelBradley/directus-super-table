@@ -1,0 +1,91 @@
+import { useStores } from '@directus/extensions-sdk';
+import { unref } from 'vue';
+
+export type PermissionAction = 'read' | 'create' | 'update' | 'delete';
+export type PermissionAccess = 'full' | 'partial' | 'none';
+
+interface PermissionEntry {
+  access: PermissionAccess;
+  fields?: string[];
+}
+
+interface SanitizeOptions {
+  translationsCollection?: string;
+  accessibleLanguages?: string[];
+}
+
+interface PermissionsByCollection {
+  [collection: string]: {
+    [action in PermissionAction]?: PermissionEntry;
+  };
+}
+
+function isPermissionsMap(value: unknown): value is PermissionsByCollection {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function usePermissions() {
+  const { usePermissionsStore } = useStores();
+  const permissionsStore = usePermissionsStore();
+
+  function getEntry(collection: string, action: PermissionAction): PermissionEntry | null {
+    const raw = unref(permissionsStore.permissions);
+    if (!isPermissionsMap(raw)) return null;
+    return raw[collection]?.[action] ?? null;
+  }
+
+  function canAction(collection: string, action: PermissionAction, field?: string): boolean {
+    const entry = getEntry(collection, action);
+    if (!entry || entry.access === 'none') return false;
+
+    if (!field) return true;
+
+    // `entry.fields` is the authoritative field-level whitelist. `access` is
+    // a coarser hint that Directus also reports as `'full'` for permissions
+    // whose `fields` is an explicit allow-list — so do NOT short-circuit on
+    // `access === 'full'` here, that would let denied fields through.
+    const fields = entry.fields ?? [];
+    if (fields.includes('*')) return true;
+    return fields.includes(field);
+  }
+
+  function getAccessibleLanguages(allLanguages: { code: string; name: string }[]): string[] {
+    if (!canAction('languages', 'read')) return [];
+    return allLanguages
+      .filter((lang) => canAction('languages', 'read', lang.code) || canAction('languages', 'read'))
+      .map((lang) => lang.code);
+  }
+
+  function sanitizeFields(
+    collection: string,
+    fields: string[],
+    options: SanitizeOptions = {}
+  ): string[] {
+    return fields.filter((rawKey) => {
+      const [pathPart, lang] = rawKey.includes(':') ? rawKey.split(':') : [rawKey, null];
+      const segments = pathPart.split('.');
+      const rootField = segments[0];
+
+      if (!canAction(collection, 'read', rootField)) return false;
+
+      if (rootField === 'translations' && segments.length > 1) {
+        const subField = segments.slice(1).join('.');
+        const transCol = options.translationsCollection;
+        if (transCol && !canAction(transCol, 'read', subField)) return false;
+        if (lang && options.accessibleLanguages && !options.accessibleLanguages.includes(lang))
+          return false;
+      }
+
+      return true;
+    });
+  }
+
+  return {
+    canRead: (collection: string, field?: string) => canAction(collection, 'read', field),
+    canUpdate: (collection: string, field?: string) => canAction(collection, 'update', field),
+    canCreate: (collection: string) => canAction(collection, 'create'),
+    canDelete: (collection: string) => canAction(collection, 'delete'),
+    getAccessibleLanguages,
+    sanitizeFields,
+  };
+}

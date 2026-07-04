@@ -9,6 +9,7 @@
     :interface-type="'tags'"
     :interface-options="interfaceOptions"
     :is-editable="isFieldEditableComputed"
+    :permission-denied="permissionDenied"
     :is-relational="false"
     :auto-save="false"
     :saving="saving"
@@ -55,6 +56,7 @@
     :interface-type="getInterfaceType() || undefined"
     :interface-options="interfaceOptions"
     :is-editable="isFieldEditableComputed"
+    :permission-denied="permissionDenied"
     :is-relational="false"
     :auto-save="false"
     :language-code-field="props.languageCodeField"
@@ -101,15 +103,12 @@
         :field="actualFieldKey"
         :alignment="align"
       />
-      <span v-else-if="field?.display === 'user'" class="raw-value">
-        {{ formatUserDisplay(value) }}
-      </span>
-      <!-- ABSOLUTE PRIORITY: User-configured display templates (ALL field types) -->
+      <!-- ABSOLUTE PRIORITY: Resolved display via override → field → heuristic chain -->
       <render-display
-        v-else-if="field?.display"
+        v-if="resolvedDisplay.display !== null"
         :value="value"
-        :display="field?.display"
-        :options="field?.displayOptions"
+        :display="resolvedDisplay.display"
+        :options="resolvedDisplay.options"
         :interface="field?.interface"
         :interface-options="field?.interfaceOptions"
         :type="field?.type"
@@ -138,9 +137,32 @@
     </template>
   </InlineEditPopover>
 
+  <!-- M2A: render each junction row, with a block icon for rows whose target
+       collection the current user cannot read -->
+  <div
+    v-else-if="isM2AField"
+    class="editable-cell relational"
+    :style="{ textAlign: props.align || 'left' }"
+  >
+    <span v-if="m2aSegments.length === 0" class="template-display">—</span>
+    <span v-else class="template-display">
+      <template v-for="(seg, i) in m2aSegments" :key="i">
+        <span v-if="i > 0">, </span>
+        <v-icon
+          v-if="isBlockedSegment(seg)"
+          v-tooltip="`No permission to read ${seg.collection}`"
+          name="block"
+          x-small
+          class="m2a-blocked-icon"
+        />
+        <span v-else>{{ seg.text }}</span>
+      </template>
+    </span>
+  </div>
+
   <!-- ABSOLUTE PRIORITY: Display templates for relational fields -->
   <div
-    v-else-if="field?.display"
+    v-else-if="resolvedDisplay.display !== null"
     class="editable-cell relational"
     :style="{ textAlign: props.align || 'left' }"
   >
@@ -161,6 +183,7 @@
 <script lang="ts" setup>
 import { computed, onBeforeMount, markRaw, ref } from 'vue';
 import type { Field, Item } from '@directus/types';
+import { useStores } from '@directus/extensions-sdk';
 import InlineEditPopover from './InlineEditPopover.vue';
 import BooleanToggleCell from './CellRenderers/BooleanToggleCell.vue';
 import SelectCell from './CellRenderers/SelectCell.vue';
@@ -169,6 +192,25 @@ import RelationalCell from './CellRenderers/RelationalCell.vue';
 import ColorCell from './CellRenderers/ColorCell.vue';
 import TagCell from './TagCell.vue';
 import { isFieldEditable, getFieldEditWarning, getFieldSupportLevel } from '../utils/fieldSupport';
+import { pickHeuristic, isM2A } from '../utils/displayHeuristics';
+import { resolveM2ARelation } from '../utils/resolveM2ARelation';
+import { buildM2ASegments, isBlockedSegment, type M2ASegment } from '../utils/buildM2ASegments';
+import { createDescribeHop } from '../utils/describeHop';
+import { resolveUserLanguage } from '../utils/resolveUserLanguage';
+import { resolveTranslationValue } from '../utils/resolveTranslationValue';
+import { renderBareTranslation } from '../utils/bareTranslationField';
+import { stripHtml } from '../utils/stripHtml';
+import { usePermissions } from '../composables/usePermissions';
+
+const { useFieldsStore, useRelationsStore, useUserStore } = useStores();
+const fieldsStore = useFieldsStore();
+const relationsStore = useRelationsStore();
+const permissions = usePermissions();
+const userStore = useUserStore?.();
+
+// Schema-aware hop resolver so M2A templates can reach deep relations
+// (e.g. translations stored inside the target collection).
+const describeHop = createDescribeHop(fieldsStore, relationsStore);
 
 const props = defineProps<{
   item: Item;
@@ -183,6 +225,7 @@ const props = defineProps<{
   directBooleanToggle?: boolean;
   primaryKeyFieldName?: string;
   languageCodeField?: string;
+  columnDisplays?: Record<string, { template: string; display?: string }>;
 }>();
 
 const emit = defineEmits<{
@@ -244,81 +287,116 @@ const actualFieldKey = computed(() => {
   return props.fieldKey;
 });
 
+// columnDisplays is keyed by the root field (no language suffix).
+const storageKey = computed(() =>
+  props.fieldKey.includes(':') ? props.fieldKey.split(':')[0] : props.fieldKey
+);
+
 const displayValue = computed(() => {
   // For edited values
   if (props.edits !== undefined) {
     return props.edits;
   }
 
-  // Special handling for translations fields
+  // Translation sub-fields go through the centralised helper so a sibling
+  // re-render during a popover open cannot leak a whole translation row
+  // through as "[object Object]".
   if (actualFieldKey.value.includes('translations.')) {
-    const translationField = actualFieldKey.value.split('.').slice(1).join('.');
-
-    // Check if translations exist and is an array
-    if (Array.isArray(props.item.translations) && props.item.translations.length > 0) {
-      // Use the language from field key (if specified) or the selected language
-      const targetLanguage = fieldLanguage.value;
-
-      if (targetLanguage) {
-        const languageField = props.languageCodeField || 'languages_code';
-        const translation = props.item.translations.find(
-          (t: any) => t[languageField] === targetLanguage
-        );
-
-        // Return the specific field value if translation exists
-        if (translation) {
-          return translation[translationField] || null;
-        }
-      }
-
-      // No translation for this language
-      return null;
-    }
-
-    // No translations available at all
-    return null;
+    return resolveTranslationValue(
+      props.item,
+      actualFieldKey.value,
+      fieldLanguage.value ?? null,
+      props.languageCodeField || 'languages_code'
+    );
   }
 
-    if (props.field?.display === 'user') {
-      const rawValue = props.item[props.fieldKey];
+  // Bare `translations` column (no sub-field, no `:lang`): render the active-
+  // language row through the configured/heuristic template instead of raw JSON.
+  // (selectedLanguage is never passed to the cell, so the active language is
+  // effectively the current user's — `fieldLanguage` stays the first operand for
+  // consistency with the dotted-translations branch above.)
+  if (props.field?.meta?.special?.includes('translations') && !actualFieldKey.value.includes('.')) {
+    return renderBareTranslation(
+      props.item[actualFieldKey.value],
+      fieldLanguage.value ?? resolveUserLanguage(userStore),
+      props.languageCodeField || 'languages_code',
+      props.columnDisplays?.[storageKey.value]?.template,
+      (row, template) => stripHtml(renderTemplate(row, template))
+    );
+  }
 
-      if (rawValue && typeof rawValue === 'object') {
-        return rawValue;
-      }
-
-      if (props.getDisplayValue) {
-        const aliasedValue = props.getDisplayValue(props.item, props.fieldKey);
-
-        if (aliasedValue && typeof aliasedValue === 'object') {
-          return aliasedValue;
-        }
-
-        if (aliasedValue != null) {
-          return aliasedValue;
-        }
-      }
-
-      const cachedValue = relationalCache.value[props.fieldKey];
-      if (cachedValue) {
-        return cachedValue;
-      }
-
-      return rawValue ?? null;
-    }
-
-  // Handle relational fields with display templates
-  const template =
+  // Display-template resolution priority: column-display override →
+  // field's own display template → relational heuristic → none.
+  const override = props.columnDisplays?.[storageKey.value];
+  const fieldTemplate =
     props.field?.displayOptions?.template || props.field?.meta?.display_options?.template;
 
-  if (template && props.field?.display) {
+  let template: string | null | undefined = null;
+  let isOverridePath = false;
+  let isHeuristicPath = false;
+
+  if (override?.template) {
+    template = override.template;
+    isOverridePath = true;
+  } else if (props.field?.display && fieldTemplate) {
+    template = fieldTemplate;
+  } else {
+    // Heuristic only fires for relational fields without override/field.display
+    const heuristic = pickHeuristic(props.field as any, relationsStore as any, fieldsStore as any);
+    if (heuristic) {
+      template = heuristic;
+      isHeuristicPath = true;
+    }
+  }
+  if (template) {
     const relationalValue = props.item[props.fieldKey];
 
-    // If we have an object, use it
-    if (relationalValue && typeof relationalValue === 'object') {
-      return renderTemplate(relationalValue, template);
+    void isOverridePath;
+    void isHeuristicPath;
+    let valueForTemplate = relationalValue;
+
+    // M2A is rendered structurally (see m2aSegments) so blocked rows can show
+    // an icon; the string path below only covers non-M2A relations.
+    if (isM2AField.value) {
+      return '';
     }
 
-    // If corrupted (primitive value), try cache fallback
+    // M2M: unwrap junction items through junction_field so the template
+    // resolves against the target row, not the pivot row.
+    const needsM2MUnwrap =
+      Array.isArray(relationalValue) && props.field?.meta?.special?.includes('m2m');
+    if (needsM2MUnwrap) {
+      const collection = props.field?.collection;
+      const fieldName = props.field?.field;
+      if (collection && fieldName) {
+        const relations = relationsStore.getRelationsForField(collection, fieldName);
+        const junctionField = relations?.[0]?.meta?.junction_field;
+        if (junctionField) {
+          valueForTemplate = relationalValue
+            .map((item: any) => item?.[junctionField])
+            .filter(Boolean);
+        }
+      }
+    }
+
+    if (Array.isArray(valueForTemplate)) {
+      if (valueForTemplate.length === 0) return '—';
+      return valueForTemplate
+        .map((item: any) =>
+          item && typeof item === 'object' ? renderTemplate(item, template as string) : String(item)
+        )
+        .filter((s) => s && s !== '—')
+        .join(', ');
+    }
+
+    if (valueForTemplate && typeof valueForTemplate === 'object') {
+      return renderTemplate(valueForTemplate, template);
+    }
+
+    if (valueForTemplate !== undefined && valueForTemplate !== null) {
+      return renderTemplate(valueForTemplate, template);
+    }
+
     const cachedValue = relationalCache.value[props.fieldKey];
     if (cachedValue) {
       return renderTemplate(cachedValue, template);
@@ -347,20 +425,118 @@ const displayValue = computed(() => {
   return props.item[props.fieldKey];
 });
 
+const isM2AField = computed(() => isM2A(props.field));
+
+// M2A cells render structurally (see buildM2ASegments) so each junction row can
+// show either its resolved template value or a `block` icon when its target
+// collection is not readable by the current user.
+const m2aSegments = computed<M2ASegment[]>(() => {
+  if (!isM2AField.value) return [];
+  const collection = props.field?.collection;
+  const fieldName = props.field?.field;
+  const m2a =
+    collection && fieldName
+      ? resolveM2ARelation(collection, fieldName, relationsStore, fieldsStore)
+      : null;
+  if (!m2a) return [];
+
+  const template =
+    props.columnDisplays?.[storageKey.value]?.template ||
+    props.field?.displayOptions?.template ||
+    props.field?.meta?.display_options?.template ||
+    `{{${m2a.discriminator}}}`;
+
+  return buildM2ASegments(
+    props.item[props.fieldKey],
+    template,
+    m2a.itemField,
+    m2a.discriminator,
+    String(fieldName),
+    props.item,
+    (c) => permissions.canRead(c),
+    { describeHop, language: resolveUserLanguage(userStore) }
+  );
+});
+
+type ResolvedDisplay = {
+  display: string | null;
+  options: Record<string, unknown>;
+  source: 'override' | 'field' | 'heuristic' | 'raw';
+};
+
+const resolvedDisplay = computed<ResolvedDisplay>(() => {
+  // 1. Layout-level override (renders via related-values unless the user
+  //    explicitly stored a different display id alongside the template)
+  const override = props.columnDisplays?.[storageKey.value];
+  if (override?.template) {
+    return {
+      display: override.display ?? 'related-values',
+      options: { template: override.template },
+      source: 'override',
+    };
+  }
+
+  // 2. Field-settings display — pass the full options object so template-less
+  //    displays (image, color, formatted-value with prefix/suffix, ...) work.
+  if (props.field?.display) {
+    return {
+      display: props.field.display,
+      options: (props.field as any).displayOptions ?? props.field?.meta?.display_options ?? {},
+      source: 'field',
+    };
+  }
+
+  // 3. Smart heuristics for relational fields without any configured display
+  const heuristic = pickHeuristic(props.field as any, relationsStore as any, fieldsStore as any);
+  if (heuristic) {
+    return {
+      display: 'related-values',
+      options: { template: heuristic },
+      source: 'heuristic',
+    };
+  }
+
+  return { display: null, options: {}, source: 'raw' };
+});
+
 // Check if field is editable using the field support utility
 const isFieldEditableComputed = computed(() => {
   if (!props.editMode) return false;
 
-  // Special case: translation fields should be editable if the base type is supported
+  // Permission check first — denies independent of field-support
+  const collection = props.field?.collection || props.item?.collection;
+  if (!collection) return false;
+
   if (actualFieldKey.value.startsWith('translations.')) {
-    // For now, allow editing of translation fields if edit mode is on
-    // The actual field support check will be done in the InlineEditPopover
-    return true;
+    // Translation sub-field: resolve the junction collection and check update permission.
+    // `collection` may already be the junction (when called from a translation cell whose
+    // field metadata.collection points at the junction) or the parent collection. Try the
+    // parent → junction lookup first; fall back to treating `collection` as the junction.
+    const subField = actualFieldKey.value.split('.').slice(1).join('.');
+    const parentRels = relationsStore.getRelationsForField(collection, 'translations');
+    const transCollection = parentRels?.[0]?.collection || collection;
+    if (!permissions.canUpdate(transCollection, subField)) return false;
+  } else {
+    if (!permissions.canUpdate(collection, actualFieldKey.value)) return false;
   }
 
-  // Use the field support utility which already handles tags and other partial support fields
-  const editable = isFieldEditable(props.field, actualFieldKey.value);
-  return editable;
+  // Field-support check (unchanged)
+  if (actualFieldKey.value.startsWith('translations.')) return true;
+  return isFieldEditable(props.field, actualFieldKey.value);
+});
+
+const permissionDenied = computed(() => {
+  if (!props.editMode) return false;
+  const collection = props.field?.collection || props.item?.collection;
+  if (!collection) return false;
+
+  if (actualFieldKey.value.startsWith('translations.')) {
+    const subField = actualFieldKey.value.split('.').slice(1).join('.');
+    const parentRels = relationsStore.getRelationsForField(collection, 'translations');
+    const transCollection = parentRels?.[0]?.collection || collection;
+    return !permissions.canUpdate(transCollection, subField);
+  }
+  return !permissions.canUpdate(collection, actualFieldKey.value);
 });
 
 // Get field edit warning message
@@ -556,13 +732,13 @@ function formatUserDisplay(value: any): string {
 }
 
 function handleUpdate(value: any) {
-  const primaryKey = Object.keys(props.item).find((key) => key === 'id' || key.endsWith('_id'));
+  const itemId = props.item?.[primaryKeyField.value];
 
-  if (primaryKey) {
+  if (itemId !== undefined && itemId !== null) {
     // Check if this is a full translations update
     if (typeof value === 'object' && value?.isFullTranslations) {
       // Handle full translations update from interface-translations
-      emit('update', props.item[primaryKey], 'translations', {
+      emit('update', itemId, 'translations', {
         isFullTranslations: true,
         translations: value.translations,
       });
@@ -577,17 +753,17 @@ function handleUpdate(value: any) {
         language: fieldLanguage.value, // Use language from field key or selected
         isTranslation: true,
       };
-      emit('update', props.item[primaryKey], props.fieldKey, translationUpdate);
+      emit('update', itemId, props.fieldKey, translationUpdate);
     } else {
-      emit('update', props.item[primaryKey], props.fieldKey, value);
+      emit('update', itemId, props.fieldKey, value);
     }
   }
 }
 
 function handleBooleanToggle(value: boolean) {
-  const primaryKey = Object.keys(props.item).find((key) => key === 'id' || key.endsWith('_id'));
-  if (primaryKey) {
-    emit('update', props.item[primaryKey], props.fieldKey, value);
+  const itemId = props.item?.[primaryKeyField.value];
+  if (itemId !== undefined && itemId !== null) {
+    emit('update', itemId, props.fieldKey, value);
   }
 }
 
@@ -636,6 +812,10 @@ function navigateToPrevCell() {
 </script>
 
 <style scoped>
+.m2a-blocked-icon {
+  --v-icon-color: var(--foreground-subdued);
+  vertical-align: middle;
+}
 .editable-cell.relational,
 .editable-cell.non-editable {
   position: relative;

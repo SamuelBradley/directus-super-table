@@ -52,6 +52,18 @@ describe('fieldSupport', () => {
       expect(isFieldEditable(undefined as any)).toBe(false);
     });
 
+    it('should keep M2A (alias) fields read-only', () => {
+      // M2A is display-only; inline editing must stay disabled.
+      const m2aVariants = [
+        { type: 'alias', meta: { interface: 'list-m2a', special: ['m2a'] } },
+        { type: 'alias', meta: { interface: 'many-to-any', special: ['m2a'] } },
+      ];
+      m2aVariants.forEach((field) => {
+        expect(isFieldEditable(field as any)).toBe(false);
+        expect(getFieldSupportLevel(field as any)).toBe('none');
+      });
+    });
+
     it('should respect readonly fields', () => {
       expect(isFieldEditable({ 
         type: 'string',

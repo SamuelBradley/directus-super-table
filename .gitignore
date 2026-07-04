@@ -1,6 +1,8 @@
 /node_modules/
 /dist/
 /index.js
+# Local pnpm build-script approvals (per-environment, run `pnpm approve-builds`; not committed)
+/pnpm-workspace.yaml
 claude.md
 /playwright-tools/
 /screenshots/
@@ -10,3 +12,14 @@ claude.md
 **/.DS_Store
 /release/
 *.tar.gz
+.superpowers/
+.playwright-mcp/
+issue47-*.png
+issue48-*.png
+live-test-*.png
+tags-vs-real-tags.png
+status-cell-debug.png
+current-page.png
+issue-37-*.png
+step*.png
+test*-*.png

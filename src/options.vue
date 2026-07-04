@@ -39,11 +39,23 @@
       Custom field name for language codes in translation collections (default: 'languages_code')
     </div>
   </div>
+
+  <ColumnDisplaysSection
+    v-if="props.collection && props.availableFieldChoices && props.availableFieldChoices.length > 0"
+    :collection="props.collection"
+    :column-displays="columnDisplays"
+    :available-fields="props.availableFieldChoices"
+    @set="onSet"
+    @remove="onRemove"
+  />
 </template>
 
 <script lang="ts" setup>
-import { computed } from 'vue';
+import { computed, type Ref } from 'vue';
 import { useSync } from '@directus/extensions-sdk';
+import ColumnDisplaysSection from './components/ColumnDisplaysSection.vue';
+import { useColumnDisplays } from './composables/useColumnDisplays';
+import type { ColumnDisplay } from './composables/useColumnDisplays';
 
 interface LayoutOptions {
   showToolbar?: boolean;
@@ -56,10 +68,13 @@ interface LayoutOptions {
   widths?: Record<string, number>;
   align?: Record<string, 'left' | 'center' | 'right'>;
   languageCodeField?: string;
+  columnDisplays?: Record<string, { template: string; display?: string }>;
 }
 
 const props = defineProps<{
   layoutOptions: LayoutOptions;
+  collection?: string;
+  availableFieldChoices?: Array<{ key: string; label: string }>;
 }>();
 
 const emit = defineEmits(['update:layoutOptions']);
@@ -68,12 +83,33 @@ const spacingOptions = ['compact', 'cozy', 'comfortable'];
 
 const layoutOptions = useSync(props, 'layoutOptions', emit);
 
-// General Settings
+const {
+  all: columnDisplays,
+  setOverride,
+  removeOverride,
+} = useColumnDisplays(layoutOptions as unknown as Ref<LayoutOptions & { [key: string]: unknown }>);
+
+function onSet(payload: { fieldKey: string; display: ColumnDisplay }) {
+  setOverride(payload.fieldKey, payload.display);
+}
+function onRemove(fieldKey: string) {
+  removeOverride(fieldKey);
+}
+
+// Issue #48: read setters from `props.layoutOptions` instead of the synced ref.
+// `useSync` is essentially `{ get: () => props.x, set: (v) => emit('update:x', v) }`
+// — the local ref does NOT update synchronously after a write; it only updates
+// when the parent re-emits the new prop value back. If two setters fire in
+// rapid succession (e.g. setOverride from useColumnDisplays then editMode toggle),
+// the second one reads STALE state from layoutOptions.value and silently
+// overwrites the columnDisplays the first setter just wrote.
+// Fix: every setter spreads `props.layoutOptions` (always the latest prop value).
+
 const showToolbar = computed({
   get: () => layoutOptions.value?.showToolbar !== false,
   set: (val) => {
     layoutOptions.value = {
-      ...layoutOptions.value,
+      ...props.layoutOptions,
       showToolbar: val,
     };
   },
@@ -93,7 +129,7 @@ const editMode = computed({
   get: () => layoutOptions.value?.editMode === true,
   set: (val) => {
     layoutOptions.value = {
-      ...layoutOptions.value,
+      ...props.layoutOptions,
       editMode: val,
     };
   },
@@ -103,7 +139,7 @@ const directBooleanToggle = computed({
   get: () => layoutOptions.value?.directBooleanToggle === true,
   set: (val) => {
     layoutOptions.value = {
-      ...layoutOptions.value,
+      ...props.layoutOptions,
       directBooleanToggle: val,
     };
   },
@@ -113,7 +149,7 @@ const languageCodeField = computed({
   get: () => layoutOptions.value?.languageCodeField || 'languages_code',
   set: (val) => {
     layoutOptions.value = {
-      ...layoutOptions.value,
+      ...props.layoutOptions,
       languageCodeField: val || undefined, // Store undefined if empty to use default
     };
   },

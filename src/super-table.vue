@@ -1,16 +1,11 @@
 <!-- super-layout-table with full relational field support and filter presets -->
 <template>
-  <div class="super-layout-table">
+  <div class="super-layout-table" @click.capture="openRowInNewTabOnModifier">
     <!-- Top Bar with Search and Filters -->
     <div class="table-toolbar" v-if="showToolbar">
       <div class="toolbar-content">
         <div class="search-input">
-          <v-input
-            v-model="searchQuery"
-            type="search"
-            :placeholder="t('search_items')"
-            @input="onSearchInput"
-          >
+          <v-input v-model="searchQuery" type="search" :placeholder="t('search_items')">
             <template #prepend>
               <v-icon name="search" />
             </template>
@@ -45,7 +40,7 @@
     </div>
     <!-- Main Table -->
     <v-table
-      v-if="loading || (itemCount && itemCount > 0 && !error)"
+      v-if="loading || hasRenderableData"
       ref="tableRef"
       v-model="selectionWritable"
       v-model:headers="tableHeadersWritable"
@@ -211,11 +206,20 @@
           :direct-boolean-toggle="(layoutOptions as any)?.directBooleanToggle"
           :primary-key-field-name="getPrimaryKeyFieldName()"
           :language-code-field="translationConfig.languageCodeField"
+          :column-displays="(layoutOptions as any)?.columnDisplays"
           @update="updateFieldValue"
           @save="autoSaveEdits"
         />
       </template>
     </v-table>
+
+    <!-- Error State when the items request failed -->
+    <div v-else-if="!loading && error" class="no-data">
+      <div class="padding-box">
+        <v-icon name="error_outline" large />
+        <p>{{ t('unexpected_error') }}</p>
+      </div>
+    </div>
 
     <!-- Empty State when no items and not loading -->
     <div v-else-if="!loading && !error" class="no-data">
@@ -230,7 +234,7 @@
     </div>
 
     <!-- Pagination Footer -->
-    <div class="footer" v-if="itemCount && itemCount > 0">
+    <div class="footer" v-if="hasRenderableData">
       <div class="pagination">
         <v-pagination
           v-if="totalPages > 1"
@@ -279,6 +283,8 @@ import { debounce } from 'lodash';
 import { useStores, useCollection, useSync, useApi } from '@directus/extensions-sdk';
 import { formatTitle } from '@directus/format-title';
 import { getDefaultDisplayForType } from './utils/getDefaultDisplayForType';
+import { filterValidFields, filterValidColumnDisplays } from './utils/fieldValidity';
+import { splitLanguageSuffix, stripLanguageSuffix } from './utils/displayHeuristics';
 import { useTableApi } from './composables/api';
 import { useAliasFields } from './composables/useAliasFields';
 import { useLanguageSelector } from './composables/useLanguageSelector';
@@ -287,11 +293,19 @@ import { useTableEdits } from './composables/useTableEdits';
 import { useTablePagination } from './composables/useTablePagination';
 import { useTableFields } from './composables/useTableFields';
 import { useFilterPresets } from './composables/useFilterPresets';
-import { adjustFieldsForDisplays } from './utils/adjustFieldsForDisplays';
+import { usePermissions } from './composables/usePermissions';
+import { useTranslationLanguages } from './composables/useTranslationLanguages';
+import { getTranslationFieldMetadata } from './utils/resolveTranslationsCollection';
+import { buildSearchFilter } from './utils/buildSearchFilter';
+import { normalizeIncomingSearch, normalizeOutgoingSearch } from './utils/searchSync';
 import {
   useTranslationConfig,
   getTranslationLanguageFieldPath,
 } from './composables/useTranslationConfig';
+import { sanitizeFilter } from './utils/sanitizeFilter';
+import { buildDeep } from './utils/buildNestedM2ADeep';
+import { buildQueryFingerprint } from './utils/buildQueryFingerprint';
+import { createCoalescedRunner } from './utils/coalesce';
 import { PER_PAGE_OPTIONS } from './constants/pagination';
 import { DEFAULT_LANGUAGES } from './constants/languages';
 import EditableCellRelational from './components/EditableCellRelational.vue';
@@ -311,8 +325,6 @@ const props = defineProps<{
   search?: string;
   readonly?: boolean;
   resetPreset?: () => void;
-  resetPresetAndRefresh?: () => void;
-  refresh?: () => void;
   clearFilters?: () => void;
 }>();
 
@@ -320,7 +332,7 @@ const emit = defineEmits<{
   'update:selection': [value: (string | number)[]];
   'update:layoutOptions': [value: LayoutOptions];
   'update:layoutQuery': [value: LayoutQuery];
-  'update:search': [value: string];
+  'update:search': [value: string | null];
   'update:filter': [value: any];
 }>();
 
@@ -340,12 +352,8 @@ const layoutQuery = useSync(props, 'layoutQuery', emit);
 
 // Collection info
 const { collection, filter, search, readonly } = toRefs(props);
-const collectionKey = computed<string | null>(() => collection.value ?? null) as unknown as Ref<
-  string | null
->;
-const { primaryKeyField, fields: fieldsInCollection, sortField } = useCollection(
-  collectionKey as any
-);
+// @ts-expect-error — Vue peer-dep skew between SDK and host: RefSymbol mismatch
+const { primaryKeyField, fields: fieldsInCollection, sortField } = useCollection(collection);
 
 // Helper to get primary key field name with proper typing
 const getPrimaryKeyFieldName = () => {
@@ -379,20 +387,29 @@ const { languages, fetchLanguages } = useLanguageSelector();
 // Per page options for pagination
 const perPageOptions = PER_PAGE_OPTIONS;
 
-// Language items for v-select
+// Permissions composable + one-shot notification flag for sanitized filters.
+// Declared here (before any computed that references it) to avoid TDZ hazards
+// — Vue's reactive watchers track dependency reads eagerly during setup, and
+// any future watcher that touches the language picker would otherwise hit the
+// uninitialised binding.
+const permissions = usePermissions();
+const filterSanitizationNotified = ref(false);
+
+// "Add column" picker uses the permission-store list (every language the user
+// could ever see) rather than the probe-based `effectiveAccessibleLanguages`,
+// so empty languages still appear as options. Header rendering keeps the
+// stricter probe list.
 const languageItems = computed(() => {
-  // If no languages loaded yet, use fallback
-  if (!languages.value || languages.value.length === 0) {
-    return DEFAULT_LANGUAGES.map((lang) => ({
+  const baseList =
+    languages.value && languages.value.length > 0 ? languages.value : DEFAULT_LANGUAGES;
+  const accessibleLanguages = permissions.getAccessibleLanguages(baseList as any);
+
+  return baseList
+    .filter((lang) => accessibleLanguages.length === 0 || accessibleLanguages.includes(lang.code))
+    .map((lang) => ({
       text: lang.name,
       value: lang.code,
     }));
-  }
-
-  return languages.value.map((lang) => ({
-    text: lang.name,
-    value: lang.code,
-  }));
 });
 
 // Existing languages for the dialog (based on pending translation field)
@@ -437,8 +454,13 @@ const sortAllowed = computed(() => {
 // Use pagination composable
 const { page, limit } = useTablePagination(layoutQuery as any);
 
-// Use sort composable
-const { sort, tableSort, onSortChange } = useTableSort(layoutQuery as any);
+// Pass collection + fieldsStore so stale sort fields referencing deleted
+// columns are silently dropped instead of triggering 400s on the next fetch.
+const { sort, tableSort, onSortChange } = useTableSort(
+  layoutQuery as any,
+  collection as Ref<string | null>,
+  fieldsStore
+);
 
 // Fields with default value computation
 const fieldsDefaultValue = computed(() => {
@@ -449,20 +471,10 @@ const fieldsDefaultValue = computed(() => {
     .sort();
 });
 
-const collectionSchemaSignature = computed(() => {
-  return fieldsInCollection.value
-    .map(
-      (field: Field) =>
-        `${field.field}:${field.meta?.display ?? ''}:${field.meta?.interface ?? ''}:${field.meta?.special?.join(',') ?? ''}`
-    )
-    .join('|');
-});
-
 const fields = computed({
   get() {
-    if (layoutQuery.value?.fields) {
-      return layoutQuery.value.fields;
-    }
+    const validFields = filterValidFields(layoutQuery.value?.fields, collection.value, fieldsStore);
+    if (validFields.length > 0) return validFields;
     return unref(fieldsDefaultValue);
   },
   set(value) {
@@ -472,105 +484,125 @@ const fields = computed({
 
 // Create a computed that strips language suffixes for aliasing
 const fieldsForAliasing = computed(() => {
-  return fields.value.map((field: string) => {
-    // Remove language suffix for alias fields
-    if (field.includes(':')) {
-      return field.split(':')[0];
-    }
-    return field;
-  });
+  return fields.value.map((field: string) => stripLanguageSuffix(field));
 });
 
-// Use alias fields for proper relational data handling
-const { aliasQuery, getFromAliasedItem } = useAliasFields(
+// Use alias fields for proper relational data handling.
+// Issue #48: forward the columnDisplays override map so the API query expands
+// override template paths (e.g. `{{ user.first_name }}`) into deep field
+// requests via `adjustFieldsForDisplays`. Drop entries that point at fields
+// the user has since deleted from the collection (mirrors filterValidFields).
+type ColumnDisplayShape = { template: string; display?: string };
+const columnDisplaysRef = computed(() =>
+  filterValidColumnDisplays<ColumnDisplayShape>(
+    (layoutOptions.value as any)?.columnDisplays,
+    collection.value,
+    fieldsStore
+  )
+);
+
+const { aliasedFields, aliasQuery, getFromAliasedItem } = useAliasFields(
   fieldsForAliasing,
   collection,
-  fieldsStore,
-  relationsStore
+  columnDisplaysRef
 );
+
+// Must be declared after `fields` / `hasTranslationFields` so the watcher
+// inside `useTranslationLanguages` doesn't touch them before initialisation
+// (Vue tracks reactive dependencies eagerly during setup → TDZ otherwise).
+const translationsCollectionRef = computed<string | null>(() => {
+  if (!hasTranslationFields.value) return null;
+  return (
+    relationsStore.getRelationsForField(collection.value, 'translations')?.[0]?.collection ?? null
+  );
+});
+
+// Probe wins over the static permission-store lookup because Directus does
+// not expose row-level filters (e.g. `languages_code._in: [de-DE, en-GB]`)
+// via /permissions/me — the aggregate query is the only way to discover them.
+const { probedLanguages } = useTranslationLanguages(
+  translationsCollectionRef,
+  computed(() => translationConfig.value.languageCodeField)
+);
+
+const effectiveAccessibleLanguages = computed<string[]>(() => {
+  if (probedLanguages.value && probedLanguages.value.length > 0) {
+    return probedLanguages.value;
+  }
+  return permissions.getAccessibleLanguages(languages.value);
+});
 
 // Create fields for API query using the aliased fields (following original Directus pattern)
 const fieldsWithRelational = computed(() => {
   if (!props.collection) return [];
 
-  // Rebuild display field expansion when collection schema/display metadata updates.
-  collectionSchemaSignature.value;
-
-  const allDisplayFields = fieldsForAliasing.value.flatMap((field: string) => {
-    return adjustFieldsForDisplays([field], collection.value, fieldsStore, relationsStore);
+  // Extract all fields from aliasedFields (this includes display-adjusted fields)
+  const allDisplayFields = Object.values(aliasedFields.value).flatMap((aliasInfo) => {
+    return aliasInfo.fields || [aliasInfo.key];
   });
 
-  // Remove duplicates
   const adjustedFields = [...new Set(allDisplayFields)];
 
-  // CRITICAL: Always include the primary key field for navigation and identification
+  // PK + language-code path are added BEFORE the permission gate so sanitize
+  // can drop them when the user lacks read access — matches native Directus,
+  // where `useCollection.primaryKeyField` is permission-filtered and a denied
+  // PK simply degrades interaction (no item-key, no inline edit) rather than
+  // 403'ing the entire fetch.
   const pkField = getPrimaryKeyFieldName();
-  if (!adjustedFields.includes(pkField)) {
-    adjustedFields.unshift(pkField); // Add at the beginning
+  if (!adjustedFields.includes(pkField)) adjustedFields.unshift(pkField);
+
+  if (hasTranslationFields.value) {
+    const languageFieldPath = getTranslationLanguageFieldPath(translationConfig.value);
+    if (!adjustedFields.includes(languageFieldPath)) adjustedFields.push(languageFieldPath);
   }
 
-  // Ensure language code field is included for translations
-  const languageFieldPath = getTranslationLanguageFieldPath(translationConfig.value);
-  if (hasTranslationFields.value && !adjustedFields.includes(languageFieldPath)) {
-    adjustedFields.push(languageFieldPath);
-  }
-
-  return adjustedFields;
+  const translationsCollection = relationsStore.getRelationsForField(
+    props.collection,
+    'translations'
+  )?.[0]?.collection;
+  return permissions.sanitizeFields(props.collection, adjustedFields, {
+    translationsCollection,
+    accessibleLanguages: effectiveAccessibleLanguages.value,
+  });
 });
 
 // Table headers with relational field support
-// Helper function to get translation field metadata
-function getTranslationFieldMetadata(fieldKey: string) {
-  if (fieldKey.startsWith('translations.')) {
-    const subFieldName = fieldKey.split('.')[1];
-
-    // Find the translations relation
-    const relationsForField = relationsStore.getRelationsForField(collection.value, 'translations');
-
-    if (relationsForField && relationsForField.length > 0) {
-      const relation = relationsForField[0];
-      // For O2M translations, the related collection contains the field definitions
-      const translationsCollection = relation.related_collection || relation.collection;
-
-      if (translationsCollection) {
-        // Get field metadata from the translations collection
-        const translationField = fieldsStore.getField(translationsCollection, subFieldName);
-        if (translationField) {
-          return translationField;
-        }
-      }
-    }
-
-    // Fallback: Common translation field types
-    const commonTranslationFields: Record<string, any> = {
-      description: { type: 'text', meta: { interface: 'input-rich-text-html' } },
-      content: { type: 'text', meta: { interface: 'input-rich-text-html' } },
-      title: { type: 'string', meta: { interface: 'input' } },
-      name: { type: 'string', meta: { interface: 'input' } },
-      subtitle: { type: 'string', meta: { interface: 'input' } },
-    };
-
-    return commonTranslationFields[subFieldName] || null;
-  }
-  return null;
-}
 
 const tableHeaders = computed(() => {
+  const accessibleLanguages = effectiveAccessibleLanguages.value;
+  const translationsCollection = translationsCollectionRef.value;
+
   const activeFields = fields.value
+    .filter((rawKey: string) => {
+      // Permission gate: drop language-suffixed translation fields the user can't read
+      const { path, language: lang } = splitLanguageSuffix(rawKey);
+      if (lang !== null && path.startsWith('translations.')) {
+        if (accessibleLanguages.length > 0 && !accessibleLanguages.includes(lang)) return false;
+        const subField = path.split('.').slice(1).join('.');
+        if (translationsCollection && !permissions.canRead(translationsCollection, subField))
+          return false;
+      }
+      // Permission gate: drop main-collection fields the user can't read
+      const rootField = stripLanguageSuffix(rawKey).split('.')[0];
+      if (!permissions.canRead(collection.value, rootField)) return false;
+      return true;
+    })
     .map((key: string) => {
       // Check if field has language suffix (e.g., "translations.description:de-DE")
-      let actualFieldKey = key;
-      let languageCode = null;
-
-      if (key.includes(':')) {
-        [actualFieldKey, languageCode] = key.split(':');
-      }
+      const split = splitLanguageSuffix(key);
+      let actualFieldKey = split.path;
+      let languageCode = split.language;
 
       let fieldData = fieldsStore.getField(collection.value, actualFieldKey);
 
       // Special handling for translation fields
       if (actualFieldKey.startsWith('translations.') && !fieldData) {
-        const translationField = getTranslationFieldMetadata(actualFieldKey);
+        const translationField = getTranslationFieldMetadata(
+          collection.value,
+          actualFieldKey,
+          fieldsStore,
+          relationsStore
+        );
         if (translationField) {
           fieldData = {
             ...translationField,
@@ -605,7 +637,7 @@ const tableHeaders = computed(() => {
     }
 
     // Handle nested field paths like "translations.title"
-    const actualKey = field.key.includes(':') ? field.key.split(':')[0] : field.key;
+    const actualKey = stripLanguageSuffix(field.key);
     const fieldParts = actualKey.split('.');
     if (fieldParts.length > 1) {
       const fieldNames = fieldParts.map((fieldKey: string, index: number) => {
@@ -720,232 +752,81 @@ const editMode = computed({
   },
 });
 
-// Search
-const searchQuery = ref(search?.value || '');
-const onSearchInput = debounce((val: string) => {
-  page.value = 1;
-  emit('update:search', val);
+// Search — single internal source of truth, mirrored from the native
+// header search (props.search, persisted per preset by Directus core).
+//
+// Native → internal: fully supported. collection.vue binds `:search` on
+// the layout wrapper and updates it per keystroke (no core debounce).
+//
+// Internal → native: NOT supported by the platform. The layout wrapper
+// (createLayoutWrapper, @directus/composables) only forwards
+// update:selection/layoutOptions/layoutQuery and silently swallows
+// `onUpdate:search`. The debounced emit below is a no-op today and kept
+// only for forward-compatibility; the equality guards make it loop-safe
+// should Directus ever whitelist `search` as a writable layout prop.
+const searchQuery = ref('');
+// Debounced mirror that actually drives the request filter, so fast typing
+// fires one fetch after the user pauses instead of one per keystroke. Seeded
+// synchronously on preset hydration / native change (below) so a
+// preset-restored search already filters the FIRST load.
+const debouncedSearchQuery = ref('');
+const applyDebouncedSearch = debounce((val: string) => {
+  debouncedSearchQuery.value = val;
 }, 300);
 
-function buildNestedFieldCondition(fieldPath: string, operator: string, value: unknown) {
-  const terminalCondition = { [operator]: value };
+// Only the FIRST hydration must reflect into the request filter synchronously
+// (a preset-restored search has to filter the initial load — no unfiltered
+// flash). Every change after that — including typing in the native header —
+// flows through watch(searchQuery) and the 300ms debounce, so the native
+// search no longer fetches once per keystroke.
+let searchSeeded = false;
+watch(
+  search,
+  (val) => {
+    // Native clear emits null; usePreset normalizes '' to null as well.
+    const incoming = normalizeIncomingSearch(val);
+    if (incoming !== searchQuery.value) {
+      searchQuery.value = incoming;
+      if (!searchSeeded) {
+        // First hydration: watch(searchQuery) isn't registered yet, so seed the
+        // debounced query directly and cancel any pending typing-debounce.
+        applyDebouncedSearch.cancel();
+        debouncedSearchQuery.value = incoming;
+      }
+      // Later changes: watch(searchQuery) schedules the debounced update.
+    }
+    searchSeeded = true;
+  },
+  { immediate: true }
+);
 
-  return fieldPath
-    .split('.')
-    .reduceRight<Record<string, unknown>>((acc, part) => ({ [part]: acc }), terminalCondition);
-}
-
-function getFieldMetadataForPath(fieldPath: string): Field | null {
-  const parts = fieldPath.split('.');
-  let currentCollection = collection.value;
-
-  for (let index = 0; index < parts.length; index++) {
-    const part = parts[index];
-    const field = fieldsStore.getField(currentCollection, part);
-
-    if (!field) return null;
-    if (index === parts.length - 1) return field;
-
-    const relations = relationsStore.getRelationsForField(currentCollection, part);
-    const relation = relations?.[0];
-    const relatedCollection = relation?.related_collection || relation?.collection;
-
-    if (!relatedCollection || relatedCollection === currentCollection) return null;
-    currentCollection = relatedCollection;
+const onSearchInput = debounce((val: string) => {
+  // Mirror native semantics: empty input is represented as null.
+  const outgoing = normalizeOutgoingSearch(val);
+  if ((search?.value ?? null) !== outgoing) {
+    emit('update:search', outgoing);
   }
+}, 300);
 
-  return null;
-}
+// Computed search filter — reads the DEBOUNCED query so the request lags
+// typing by one debounce window instead of recomputing per keystroke.
+const searchFilter = computed(() =>
+  buildSearchFilter({
+    query: debouncedSearchQuery.value,
+    visibleFields: fields.value,
+    fieldsInCollection: fieldsInCollection.value,
+    collection: collection.value,
+    fieldsStore,
+    relationsStore,
+  })
+);
 
-// Build search filter for all fields including translations
-function buildSearchFilter(query: string) {
-  if (!query || query.trim() === '') return null;
-
-  const searchValue = query.trim();
-  const conditions: any[] = [];
-  const processedFields = new Set<string>(); // Track processed fields to avoid duplicates
-
-  // Helper function to check if a string is a valid UUID
-  const isValidUUID = (str: string) => {
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    return uuidRegex.test(str);
-  };
-
-  // Helper function to check if a string is a valid integer
-  const isValidInteger = (str: string) => {
-    return /^\d+$/.test(str);
-  };
-
-  // Check if the search value is a valid UUID or integer
-  const searchIsUUID = isValidUUID(searchValue);
-  const searchIsInteger = isValidInteger(searchValue);
-  const searchAsInteger = searchIsInteger ? parseInt(searchValue, 10) : null;
-
-  // Process each visible field
-  fields.value.forEach((fieldKey: string) => {
-    // Remove language suffix if present (e.g., "translations.description:de-DE" -> "translations.description")
-    const actualFieldKey = fieldKey.includes(':') ? fieldKey.split(':')[0] : fieldKey;
-
-    // Skip if we've already processed this field (prevents duplicates from multi-language fields)
-    if (processedFields.has(actualFieldKey)) {
-      return;
-    }
-    processedFields.add(actualFieldKey);
-
-    if (actualFieldKey.includes('.')) {
-      // Handle relational fields
-      const parts = actualFieldKey.split('.');
-      const rootField = parts[0];
-      const nestedField = parts.slice(1).join('.');
-
-      if (rootField === 'translations') {
-        // For translations, always search in ALL languages
-        // This ensures users can find content regardless of the displayed language
-        conditions.push({
-          translations: {
-            _some: {
-              [nestedField]: {
-                _icontains: searchValue,
-              },
-            },
-          },
-        });
-      } else {
-        const nestedField = getFieldMetadataForPath(actualFieldKey);
-        const searchableTypes = ['string', 'text'];
-
-        if (nestedField && searchableTypes.includes(nestedField.type)) {
-          conditions.push(buildNestedFieldCondition(actualFieldKey, '_icontains', searchValue));
-        } else if (nestedField && nestedField.type === 'uuid' && searchIsUUID) {
-          conditions.push(buildNestedFieldCondition(actualFieldKey, '_eq', searchValue));
-        } else if (nestedField && nestedField.type === 'integer' && searchIsInteger) {
-          conditions.push(buildNestedFieldCondition(actualFieldKey, '_eq', searchAsInteger));
-        } else {
-          conditions.push(buildNestedFieldCondition(actualFieldKey, '_icontains', searchValue));
-        }
-      }
-    } else {
-      // Direct fields - check if it's a searchable type
-      const field = fieldsStore.getField(collection.value, actualFieldKey);
-      const searchableTypes = ['string', 'text'];
-
-      if (field && searchableTypes.includes(field.type)) {
-        conditions.push({
-          [actualFieldKey]: {
-            _icontains: searchValue,
-          },
-        });
-      } else if (field && field.type === 'uuid' && searchIsUUID) {
-        // For UUID fields, use _eq if the search value is a complete valid UUID
-        conditions.push({
-          [actualFieldKey]: {
-            _eq: searchValue,
-          },
-        });
-      } else if (field && field.type === 'integer' && searchIsInteger) {
-        // For integer fields (including ID), use _eq if the search value is a valid integer
-        conditions.push({
-          [actualFieldKey]: {
-            _eq: searchAsInteger,
-          },
-        });
-      }
-      // Note: UUID fields only support _eq, _neq, _in, _nin comparisons
-      // Integer fields support exact match with _eq when searching by number
-    }
-  });
-
-  // If no searchable fields, fallback to all string/text/uuid/integer fields
-  if (conditions.length === 0) {
-    fieldsInCollection.value.forEach((field: Field) => {
-      const searchableTypes = ['string', 'text'];
-
-      if (searchableTypes.includes(field.type) && !field.meta?.hidden) {
-        conditions.push({
-          [field.field]: {
-            _icontains: searchValue,
-          },
-        });
-      } else if (field.type === 'uuid' && !field.meta?.hidden && searchIsUUID) {
-        // Add UUID fields to search if we have a valid UUID
-        conditions.push({
-          [field.field]: {
-            _eq: searchValue,
-          },
-        });
-      } else if (field.type === 'integer' && !field.meta?.hidden && searchIsInteger) {
-        // Add integer fields (including ID) to search if we have a valid integer
-        conditions.push({
-          [field.field]: {
-            _eq: searchAsInteger,
-          },
-        });
-      }
-    });
-  }
-
-  return conditions.length > 0 ? { _or: conditions } : null;
-}
-
-// Computed search filter
-const searchFilter = computed(() => {
-  return buildSearchFilter(searchQuery.value);
-});
-
-// Build deep parameter for relational fields
-const deep = computed(() => {
-  const deepFields: Record<string, any> = {};
-
-  // Rebuild relation deep queries when the active collection schema updates.
-  collectionSchemaSignature.value;
-
-  fields.value.forEach((field: string) => {
-    // Remove language suffix if present
-    const actualField = field.includes(':') ? field.split(':')[0] : field;
-
-    // Handle dot-notation relational fields (like "user_created.first_name")
-    if (actualField.includes('.')) {
-      const parts = actualField.split('.');
-      const rootField = parts[0];
-
-      // For translations, we fetch all and filter client-side
-      if (rootField === 'translations') {
-        if (!deepFields[rootField]) {
-          deepFields[rootField] = {
-            _fields: ['*'], // Get all fields including languages_code
-            _limit: -1, // Get all translations for client-side filtering
-          };
-        }
-      } else {
-        // For other relations
-        if (!deepFields[rootField]) {
-          deepFields[rootField] = {
-            _fields: ['*'],
-          };
-        }
-      }
-    } else {
-      // Handle pure relational fields (like "image_data", "status_id", etc.)
-      // Check if this field is relational by looking at field metadata
-      const fieldMeta = fieldsStore.getField(collection.value, actualField);
-
-      if (
-        fieldMeta?.meta?.special?.includes('m2o') ||
-        fieldMeta?.meta?.special?.includes('o2m') ||
-        fieldMeta?.meta?.special?.includes('m2m') ||
-        fieldMeta?.meta?.special?.includes('m2a')
-      ) {
-        if (!deepFields[actualField]) {
-          deepFields[actualField] = {
-            _fields: ['*'],
-          };
-        }
-      }
-    }
-  });
-
-  return Object.keys(deepFields).length > 0 ? deepFields : undefined;
-});
+// Build the `deep` parameter from a single schema-driven classifier. Two field
+// lists: `fields` drives the first-level entries, `fieldsWithRelational` carries
+// the display-expanded M2A item paths for the nested entries.
+const deep = computed(() =>
+  buildDeep(fields.value, fieldsWithRelational.value, collection.value, fieldsStore, relationsStore)
+);
 
 // Initialize filter presets composable with layoutOptions
 const {
@@ -991,21 +872,8 @@ async function handleQuickFilterSaved(event: any) {
   }
 }
 
-// Setup event listeners on mount
-onMounted(() => {
-  // Load presets from layoutOptions (no localStorage needed)
-  loadPresets();
-
-  // Load initial items
-  getItems();
-
-  // Listen for save events from actions
-  window.addEventListener('quick-filter-saved', handleQuickFilterSaved);
-});
-
-onUnmounted(() => {
-  window.removeEventListener('quick-filter-saved', handleQuickFilterSaved);
-});
+// Initial load + the quick-filter-saved listener are registered in the single
+// consolidated onMounted/onUnmounted at the end of the script.
 
 // Update manual filters when props.filter changes (from native filter interface)
 watch(
@@ -1016,24 +884,53 @@ watch(
   { immediate: true, deep: true }
 );
 
-// Combine all filters: presets + manual + search
-const combinedFilter = computed(() => {
+// Combine all filters: presets + manual + search, then sanitize against
+// the user's read permissions. Computed stays pure; the user-facing
+// notification is emitted from a watcher to keep side-effects out of
+// reactivity-sensitive computations.
+const sanitizedFilterResult = computed(() => {
   const presetFilter = presetMergedFilters.value;
   const searchFilterValue = searchFilter.value;
 
-  const filters = [];
-
+  const filters: any[] = [];
   if (presetFilter) filters.push(presetFilter);
   if (searchFilterValue) filters.push(searchFilterValue);
 
-  if (filters.length === 0) return undefined;
-  if (filters.length === 1) return filters[0];
+  const merged =
+    filters.length === 0 ? undefined : filters.length === 1 ? filters[0] : { _and: filters };
+  if (!merged) return { sanitized: undefined, removed: [] as string[] };
 
-  // Combine all filters with AND logic
-  return {
-    _and: filters,
+  // `nestedScopes` makes the walker check sub-fields under `_some`/`_none`/
+  // `_every` against the junction collection rather than the parent —
+  // without it, `{ translations: { _some: { description: ... } } }` would
+  // slip past the parent's `canRead('translations')` check and reach the
+  // server with a sub-field the user cannot read.
+  const nestedScopes: Record<string, string | undefined> = {
+    translations: translationsCollectionRef.value ?? undefined,
   };
+  return sanitizeFilter(
+    merged,
+    (field, scope) => permissions.canRead(scope ?? collection.value, field),
+    { nestedScopes }
+  );
 });
+
+const combinedFilter = computed(() => (sanitizedFilterResult.value.sanitized ?? undefined) as any);
+
+watch(
+  () => sanitizedFilterResult.value.removed,
+  (removed) => {
+    if (removed.length > 0 && !filterSanitizationNotified.value) {
+      notificationsStore.add({
+        type: 'info',
+        title: 'Filter partially applied',
+        text: `Some filter conditions were removed because you don't have access: ${removed.join(', ')}`,
+      });
+      filterSanitizationNotified.value = true;
+    }
+  },
+  { immediate: true }
+);
 
 // Items & Loading with proper fields and alias handling
 // Data fetching with new API
@@ -1050,62 +947,80 @@ const totalPages = computed(() => {
   return Math.ceil(itemCount.value / limit.value);
 });
 
-// Fetch items function
+// A failed items fetch leaves the count populated (separate request), so gate
+// table + footer on this to avoid a blank body under a live pagination bar.
+const hasRenderableData = computed(
+  () => (itemCount.value > 0 || items.value.length > 0) && !error.value
+);
+
+// Items + count are fetched as two separate requests so users without read
+// permission on the PK still see a populated table — `meta=filter_count`
+// resolves via `countDistinct(pk)` server-side and would 403, while
+// `aggregate[count]=*` (used by `fetchItemCount`) does not.
 async function getItems() {
   try {
-    const response = await tableApi.fetchItems({
-      collection: collection.value,
-      fields: fieldsWithRelational.value,
-      filter: combinedFilter.value,
-      sort: sort.value,
-      page: page.value,
-      limit: limit.value,
-      deep: deep.value,
-      alias: aliasQuery.value || undefined,
-    });
-
-    // Update our local items ref (not the one from tableApi)
-    items.value = response.data || [];
+    const [itemsResult] = await Promise.all([
+      tableApi.fetchItems({
+        collection: collection.value,
+        fields: fieldsWithRelational.value,
+        filter: combinedFilter.value,
+        sort: sort.value,
+        page: page.value,
+        limit: limit.value,
+        deep: deep.value,
+        alias: aliasQuery.value || undefined,
+      }),
+      tableApi
+        .fetchItemCount(collection.value, combinedFilter.value, undefined, getPrimaryKeyFieldName())
+        .catch(() => undefined),
+    ]);
+    items.value = itemsResult?.data || [];
   } catch {
-    // Error is handled by tableApi internally
+    // Items error already in tableApi.error; count is best-effort
   }
 }
+
+// Every refetch funnels through ONE runner: same-tick watcher storms collapse
+// into one execution, and overlapping executions are serialized with a single
+// trailing re-run (prevents an older response overwriting newer rows).
+// Force-refresh paths (events, auto-save, manual-sort recovery) call this
+// directly and therefore bypass the fingerprint dedupe on purpose: same
+// params, but server data changed.
+const scheduleGetItems = createCoalescedRunner(getItems);
 
 // Create a wrapper function for getItems
 async function refreshItems() {
-  await getItems();
+  await scheduleGetItems();
 }
 
-// Watch for refresh prop calls
-watch(
-  () => props.refresh,
-  (newVal) => {
-    if (newVal) {
-      refreshItems();
-    }
-  }
+// Refetch when the EFFECTIVE query changes. A string fingerprint makes Vue
+// dedupe by content: the upstream computeds rebuild arrays/objects with fresh
+// identity on every recompute (columnDisplaysRef -> aliasedFields ->
+// fieldsWithRelational), which used to re-fire this watcher with identical
+// parameters (e.g. three identical request pairs on bookmark load, and a
+// refetch on every layoutOptions write). Every fetch parameter getItems
+// reads is part of the fingerprint, so the watcher fires exactly when the
+// effective request changes. (searchQuery needs no own key: it only reaches
+// the request through combinedFilter.)
+const queryFingerprint = computed(() =>
+  buildQueryFingerprint({
+    collection: collection.value,
+    fields: fieldsWithRelational.value,
+    filter: combinedFilter.value,
+    sort: sort.value,
+    page: page.value,
+    limit: limit.value,
+    deep: deep.value,
+    alias: aliasQuery.value,
+  })
 );
 
-// Watch for query parameter changes
-watch(
-  [collection, combinedFilter, sort, page, limit, fieldsWithRelational, deep],
-  () => {
-    // Don't refetch during manual sorting
-    if (!isManualSorting) {
-      getItems();
-    }
-  },
-  { deep: true }
-);
-
-watch(
-  () => props.resetPresetAndRefresh,
-  (newVal) => {
-    if (newVal) {
-      refreshItems();
-    }
+watch(queryFingerprint, () => {
+  // Don't refetch during manual sorting (same guard as before)
+  if (!isManualSorting) {
+    scheduleGetItems();
   }
-);
+});
 
 // Handle select all toggle
 function onToggleSelectAll() {
@@ -1127,7 +1042,7 @@ const { edits, savingCells, updateFieldValue, autoSaveEdits } = useTableEdits(
   collection,
   computed(() => primaryKeyField?.value || (primaryKeyField as any) || undefined),
   items,
-  getItems,
+  scheduleGetItems,
   translationConfig.value.languageCodeField
 );
 
@@ -1251,21 +1166,30 @@ function toPage(newPage: number) {
   page.value = newPage;
 }
 
-function editItem(item: Item) {
+function getItemRoute(item: Item): string | null {
   // Get the primary key field name directly (no .value needed as per Directus pattern)
   const pkField = getPrimaryKeyFieldName();
   const primaryKey = item[pkField];
+  if (!primaryKey) return null;
+  return `/content/${collection.value}/${encodeURIComponent(String(primaryKey))}`;
+}
 
-  if (!primaryKey) {
+// Resolve the detail route, or surface a warning when the primary key is missing
+function getItemRouteOrWarn(item: Item): string | null {
+  const route = getItemRoute(item);
+  if (!route) {
     notificationsStore.add({
       type: 'warning',
       title: 'Navigation Error',
       text: `Could not find primary key in item`,
     });
-    return;
   }
+  return route;
+}
 
-  router.push(`/content/${collection.value}/${primaryKey}`);
+function editItem(item: Item) {
+  const route = getItemRouteOrWarn(item);
+  if (route) router.push(route);
 }
 
 // Helper function to move item in array (exact Directus implementation)
@@ -1318,7 +1242,7 @@ async function handleManualSort({ item, to }: { item: any; to: any }) {
     });
   } catch (error: any) {
     // Refresh items to restore correct order on error
-    await getItems();
+    await scheduleGetItems();
 
     notificationsStore.add({
       title: t('error_moving_item'),
@@ -1358,38 +1282,77 @@ function handleTableRowClick({ item, event }: { item: Item; event: MouseEvent })
   editItem(item);
 }
 
+// v-table suppresses click:row in edit mode; intercept modifier-clicks in the capture phase to open a new tab in both modes
+function openRowInNewTabOnModifier(event: MouseEvent) {
+  if (!event.ctrlKey && !event.metaKey) return;
+  const target = event.target as HTMLElement | null;
+  if (
+    !target ||
+    target.closest('button') ||
+    target.closest('.v-checkbox') ||
+    target.closest('input') ||
+    target.closest('textarea') ||
+    target.closest('.v-select')
+  ) {
+    return;
+  }
+  const row = target.closest('tbody tr');
+  const tbody = row?.parentElement;
+  if (!row || !tbody) return;
+  const item = items.value[Array.from(tbody.children).indexOf(row)];
+  if (!item) return;
+  const route = getItemRouteOrWarn(item);
+  if (!route) return;
+  window.open(router.resolve(route).href, '_blank', 'noopener,noreferrer');
+  event.preventDefault();
+  event.stopPropagation();
+}
+
 // Watch for search changes
 watch(searchQuery, (val) => {
+  applyDebouncedSearch(val);
   onSearchInput(val);
 });
 
 // Handle refresh event from actions component (for duplicate)
 function handleItemsDuplicated() {
   // Refresh the items list
-  getItems();
+  scheduleGetItems();
   // Clear selection after successful duplication
   selection.value = [];
 }
 
-// Setup event listeners for cross-component communication
+// Setup event listeners for cross-component communication.
+// Named handlers so onUnmounted removes the SAME references it registered
+// (the previous inline arrows made the removals silent no-ops).
+function handleItemsDeletedEvent() {
+  refreshItems();
+}
+
+function handleRefreshCollectionEvent(event: any) {
+  if (event.detail?.collection === collection.value) {
+    refreshItems();
+  }
+}
+
 onMounted(() => {
+  // Initial load: presets first, then items.
+  loadPresets();
+  scheduleGetItems();
+
+  // All window listeners in one place; named handlers so onUnmounted removes the
+  // SAME references (inline arrows would make the removals silent no-ops).
+  window.addEventListener('quick-filter-saved', handleQuickFilterSaved);
   window.addEventListener('directus-items-duplicated', handleItemsDuplicated);
-
-  // Listen for Directus core delete events
-  window.addEventListener('items-deleted', () => refreshItems());
-
-  // Listen for collection refresh events
-  window.addEventListener('refresh-collection', (event: any) => {
-    if (event.detail?.collection === collection.value) {
-      refreshItems();
-    }
-  });
+  window.addEventListener('items-deleted', handleItemsDeletedEvent);
+  window.addEventListener('refresh-collection', handleRefreshCollectionEvent);
 });
 
 onUnmounted(() => {
+  window.removeEventListener('quick-filter-saved', handleQuickFilterSaved);
   window.removeEventListener('directus-items-duplicated', handleItemsDuplicated);
-  window.removeEventListener('items-deleted', refreshItems);
-  window.removeEventListener('refresh-collection', refreshItems);
+  window.removeEventListener('items-deleted', handleItemsDeletedEvent);
+  window.removeEventListener('refresh-collection', handleRefreshCollectionEvent);
 });
 </script>
 

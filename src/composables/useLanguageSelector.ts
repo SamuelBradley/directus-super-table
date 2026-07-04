@@ -3,6 +3,7 @@ import { useStores } from '@directus/extensions-sdk';
 import { useTableApi } from './api';
 import type { Language } from '../types/table.types';
 import { DEFAULT_LANGUAGES, DEFAULT_LANGUAGE_CODE } from '../constants/languages';
+import { resolveUserLanguage } from '../utils/resolveUserLanguage';
 
 export function useLanguageSelector() {
   const tableApi = useTableApi();
@@ -14,7 +15,7 @@ export function useLanguageSelector() {
   const loadingLanguages = ref(false);
 
   // Selected language - default to user's language
-  const selectedLanguage = ref<string>(userStore.currentUser?.language || DEFAULT_LANGUAGE_CODE);
+  const selectedLanguage = ref<string>(resolveUserLanguage(userStore) || DEFAULT_LANGUAGE_CODE);
 
   // Fetch available languages from Directus
   async function fetchLanguages() {

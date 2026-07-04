@@ -7,6 +7,11 @@ import { config } from '@vue/test-utils';
 vi.mock('@directus/utils', () => ({
   formatTitle: (str: string) => str.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
   isDirectusError: vi.fn(() => false),
+  // Minimal dotted-path getter mirroring @directus/utils `get`.
+  get: (obj: any, path: string) => {
+    if (!path) return undefined;
+    return path.split('.').reduce((acc: any, key: string) => acc?.[key], obj);
+  },
 }));
 
 vi.mock('@directus/format-title', () => ({
@@ -40,6 +45,33 @@ vi.mock('@/stores', () => ({
   useFieldsStore: () => mockFieldsStore,
   useRelationsStore: () => mockRelationsStore,
   useCollectionStore: () => mockCollectionStore,
+}));
+
+// Mock the extensions-sdk to keep the real module (and its transitive @directus/themes
+// → pinia chain) out of the test runtime. Individual tests can override via
+// vi.doMock + vi.resetModules() if they need richer behavior.
+vi.mock('@directus/extensions-sdk', () => ({
+  useStores: () => ({
+    useFieldsStore: () => mockFieldsStore,
+    useRelationsStore: () => mockRelationsStore,
+    useCollectionStore: () => mockCollectionStore,
+  }),
+  useCollection: () => ({ primaryKeyField: { value: { field: 'id' } } }),
+  useApi: () => ({
+    get: vi.fn(),
+    post: vi.fn(),
+    patch: vi.fn(),
+    delete: vi.fn(),
+  }),
+  useSync: <T,>(props: Record<string, T>, key: string, emit: (e: string, v: T) => void) => ({
+    get value(): T {
+      return props[key]!;
+    },
+    set value(v: T) {
+      emit(`update:${key}`, v);
+    },
+  }),
+  defineLayout: vi.fn(),
 }));
 
 // Mock Directus SDK

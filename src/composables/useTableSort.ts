@@ -1,5 +1,6 @@
 import { computed, Ref } from 'vue';
 import type { LayoutQuery } from '../types/table.types';
+import { filterValidSort } from '../utils/fieldValidity';
 
 // Define Sort interface locally since it's not exported from @directus/types
 interface Sort {
@@ -7,7 +8,15 @@ interface Sort {
   desc: boolean;
 }
 
-export function useTableSort(layoutQuery: Ref<LayoutQuery>) {
+interface FieldsStoreLike {
+  getField: (collection: string | null, field: string) => unknown;
+}
+
+export function useTableSort(
+  layoutQuery: Ref<LayoutQuery>,
+  collection?: Ref<string | null>,
+  fieldsStore?: FieldsStoreLike
+) {
   // Helper function to clean language suffixes from sort field
   function cleanSortItem(sortItem: string): string {
     if (sortItem.includes(':')) {
@@ -22,12 +31,19 @@ export function useTableSort(layoutQuery: Ref<LayoutQuery>) {
     return sortItem;
   }
 
+  // Issue #47: drop sort entries pointing at deleted fields so the API
+  // doesn't reject the whole query with HTTP 403.
+  function dropStaleSortEntries(entries: string[]): string[] {
+    if (!collection || !fieldsStore) return entries;
+    return filterValidSort(entries, collection.value, fieldsStore);
+  }
+
   // Clean up language suffixes from sort fields
   const sort = computed({
     get() {
       const rawSort = layoutQuery.value?.sort || [];
-      // Clean up any language suffixes from sort fields
-      return rawSort.map(cleanSortItem);
+      const cleaned = rawSort.map(cleanSortItem);
+      return dropStaleSortEntries(cleaned);
     },
     set(newSort: string[]) {
       // Clean sort values before saving

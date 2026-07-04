@@ -2,9 +2,8 @@
   <div class="action-buttons">
     <!-- Duplicate Button nur anzeigen wenn Items ausgewählt sind -->
     <v-button
-      v-if="hasSelection"
+      v-if="hasSelection && canDuplicate"
       v-tooltip.bottom="duplicateTooltip"
-      :disabled="!canDuplicate"
       icon
       rounded
       secondary
@@ -13,6 +12,17 @@
     >
       <v-icon name="content_copy" />
     </v-button>
+
+    <!-- Save current view as a (personal or shared) bookmark -->
+    <save-view-dialog
+      :collection="collection"
+      :filter="filter"
+      :search="search"
+      :layout-options="layoutOptions"
+      :layout-query="layoutQuery"
+      :can-save-views="canSaveViews"
+      :available-scopes="availableScopes"
+    />
 
     <!-- Save as Quick Filter Button - nur wenn native Filter gesetzt ist -->
     <v-button
@@ -112,6 +122,11 @@ import { useStores, useCollection } from '@directus/extensions-sdk';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { useTableApi } from './composables/api';
+import { usePermissions } from './composables/usePermissions';
+import { useSharedViews } from './composables/useSharedViews';
+import SaveViewDialog from './components/SaveViewDialog.vue';
+import { colorOptions, getColorLabel, getColorValue } from './utils/colors';
+import { fixIconMenuScroll } from './utils/fixIconMenuScroll';
 
 const LAYOUT_ID = 'super-layout-table';
 
@@ -136,6 +151,8 @@ const tableApi = useTableApi();
 const route = useRoute();
 const { useNotificationsStore } = useStores();
 const notificationsStore = useNotificationsStore();
+const permissions = usePermissions();
+const { canSaveViews, availableScopes } = useSharedViews();
 
 // State for Save Filter Dialog
 const saveDialogActive = ref(false);
@@ -144,16 +161,6 @@ const filterName = ref('');
 const filterIcon = ref('filter_list');
 const filterColor = ref('primary');
 const latestLayoutOptions = ref(props.layoutOptions || {});
-
-// Color options for filter buttons
-const colorOptions = [
-  { text: 'Primary (Blue)', value: 'primary' },
-  { text: 'Gray', value: 'gray' },
-  { text: 'Success (Green)', value: 'success' },
-  { text: 'Warning (Orange)', value: 'warning' },
-  { text: 'Danger (Red)', value: 'danger' },
-  { text: 'Info (Light Blue)', value: 'info' },
-];
 
 const hasSelection = computed(() => props.selection && props.selection.length > 0);
 const currentBookmarkId = computed(() => {
@@ -231,62 +238,12 @@ const hasNativeFilter = computed(() => {
   return true;
 });
 
-// Als Admin haben wir immer Create-Rechte, außer es wird explizit verboten
-// In Layout Extensions ist der Permissions-Check anders als in anderen Extensions
-const canDuplicate = computed(() => {
-  // Einfacher Check - wenn wir hier sind, haben wir vermutlich Rechte
-  return true;
-});
+const canDuplicate = computed(() => permissions.canCreate(props.collection));
 
 const duplicateTooltip = computed(() => {
   const count = props.selection?.length || 0;
   return count === 1 ? 'Duplicate item' : `Duplicate ${count} items`;
 });
-
-// Helper functions for color selector
-function getColorValue(colorName: string): string {
-  const colorMap: Record<string, string> = {
-    primary: 'var(--primary)',
-    gray: '#6c757d', // Bootstrap gray - works in both light and dark themes
-    success: 'var(--success)',
-    warning: 'var(--warning)',
-    danger: 'var(--danger)',
-    info: 'var(--info)',
-  };
-  return colorMap[colorName] || 'var(--primary)';
-}
-
-function getColorLabel(colorName: string): string {
-  const option = colorOptions.find((opt) => opt.value === colorName);
-  return option ? option.text : 'Primary (Blue)';
-}
-
-// Function to fix icon menu scrolling
-function fixIconMenuScroll() {
-  // Use multiple timeouts to catch the menu at different stages of rendering
-  const delays = [0, 50, 100, 200, 300];
-
-  delays.forEach((delay) => {
-    setTimeout(() => {
-      // Find all v-menu-content elements
-      const menus = document.querySelectorAll('.v-menu-content');
-
-      menus.forEach((menu) => {
-        // Check if this menu has icons (is an icon selector)
-        if (menu.querySelector('.icons')) {
-          const menuEl = menu as HTMLElement;
-
-          // Force the styles with inline style
-          menuEl.style.cssText = `
-            max-height: 400px !important;
-            overflow-y: auto !important;
-            overflow-x: hidden !important;
-          `;
-        }
-      });
-    }, delay);
-  });
-}
 
 // Methods
 function openSaveFilterDialog() {

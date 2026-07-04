@@ -2,6 +2,7 @@ import { ref, computed, Ref } from 'vue';
 import type { Field } from '@directus/types';
 import type { Edits } from '../types/table.types';
 import { useTableApi } from './api';
+import { useStores } from '@directus/extensions-sdk';
 
 export function useTableEdits(
   collection: Ref<string>,
@@ -11,6 +12,8 @@ export function useTableEdits(
   languageCodeField = 'languages_code'
 ) {
   const tableApi = useTableApi();
+  const { useNotificationsStore } = useStores();
+  const notificationsStore = useNotificationsStore();
   const edits = ref<Edits>({});
   const hasEdits = computed(() => Object.keys(edits.value).length > 0);
   const savingCells = ref<Record<string, boolean>>({});
@@ -111,8 +114,13 @@ export function useTableEdits(
 
       // Refresh the item data
       await getItems();
-    } catch {
-      // Failed to save edits
+    } catch (error: any) {
+      const status = error?.response?.status ?? error?.status;
+      const message =
+        status === 403
+          ? 'You do not have permission to update this field'
+          : error?.message || 'Failed to save changes';
+      notificationsStore.add({ type: 'error', title: 'Save failed', text: message });
     } finally {
       // Clear saving state
       for (const field of Object.keys(changes)) {

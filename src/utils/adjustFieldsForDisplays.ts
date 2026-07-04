@@ -1,5 +1,24 @@
 // CORE CHANGES - Following original Directus approach
 import { useStores, useCollection } from '@directus/extensions-sdk';
+import type { ColumnDisplay } from '../composables/useColumnDisplays';
+import {
+  parseTemplateTokens,
+  isRelational,
+  isM2A,
+  pickHeuristic,
+  parseM2AToken,
+  buildM2AFieldPath,
+  isM2APrefix,
+  stripM2AFieldPrefix,
+  splitLanguageSuffix,
+  stripLanguageSuffix,
+  M2A_COLLECTION_TOKEN,
+} from './displayHeuristics';
+import { resolveM2ARelation } from './resolveM2ARelation';
+import { createDescribeHop } from './describeHop';
+import { collectTranslationLanguagePaths } from './resolveRelationalPath';
+import { validateDeepPath } from './fieldValidity';
+import { warnOnce } from './warnOnce';
 
 /**
  * Helper function to get the related collection for a field
@@ -123,6 +142,12 @@ function getDisplayFieldsForRelation(
     return null; // Let deep parameter with _fields: ['*'] handle it
   }
 
+  // M2A target is polymorphic; the bare deep parameter supplies the data and
+  // requesting a fixed PK against the junction would 403.
+  if (isM2A(field)) {
+    return null;
+  }
+
   const fieldName = (field.field || field.key)?.split('.')[0];
   const relatedCollection = getRelatedCollection(parentCollection, fieldName, relationsStore);
 
@@ -148,36 +173,283 @@ function getDisplayFieldsForRelation(
   return [`${fieldKey}.${pkField}`];
 }
 
+// Expands template tokens to API field paths. For M2M, traverses
+// junction_field to reach the target collection. Every emitted path is
+// walked per segment against the schema (validateDeepPath); invalid tokens
+// are dropped with a deduplicated warning. Translations skip validation
+// (varying schemas; rows arrive via the deep parameter and the renderer
+// tolerates missing leaves).
+export function expandTokensThroughRelation(
+  field: { meta?: { special?: string[] } } | null,
+  fieldKey: string,
+  parentCollection: string,
+  tokens: string[],
+  fieldsStore: { getField: (collection: string, fieldName: string) => any },
+  relationsStore: { getRelationsForField: (collection: string, fieldName: string) => any[] }
+): string[] {
+  if (!tokens.length) return [];
+  const isM2M = field?.meta?.special?.includes('m2m') === true;
+  const isM2A = field?.meta?.special?.includes('m2a') === true;
+  const isTranslations = field?.meta?.special?.includes('translations') === true;
+
+  if (isTranslations) {
+    return tokens.map((tok) => `${fieldKey}.${tok}`);
+  }
+
+  // Shared schema walker for every relational branch below. Creating it is a
+  // cheap closure factory; no store access happens until a hop is described.
+  const describeHop = createDescribeHop(fieldsStore, relationsStore);
+
+  if (isM2A) {
+    const m2a = resolveM2ARelation(parentCollection, fieldKey, relationsStore, fieldsStore);
+    if (!m2a) return [];
+    const { itemField, discriminator, allowedCollections, junctionCollection } = m2a;
+
+    // The discriminator is always needed so the renderer knows which target
+    // collection each row points at before resolving per-collection tokens.
+    const expanded: string[] = [`${fieldKey}.${discriminator}`];
+    const add = (path: string) => {
+      if (!expanded.includes(path)) expanded.push(path);
+    };
+
+    for (const rawTok of tokens) {
+      // The native picker prefixes relation tokens with the field key. A prefix
+      // means a junction/item field; a bare token is a parent-level field.
+      const hadPrefix = rawTok.startsWith(`${fieldKey}.`);
+      const tok = stripM2AFieldPrefix(rawTok, fieldKey);
+      // The discriminator (and its conventional `collection` alias) is always
+      // emitted above; skip so it's never re-emitted as a junction/parent field.
+      if (tok === discriminator || tok === M2A_COLLECTION_TOKEN) continue;
+
+      // Per-collection item token: "item:collection.path".
+      const parsed = parseM2AToken(tok);
+      if (parsed && isM2APrefix(parsed.prefix, fieldKey, itemField)) {
+        const { collection: col } = parsed;
+        // Drop the extension-only `:lang` suffix; the API path must not carry it
+        // (the renderer picks the translation language client-side).
+        const { path } = splitLanguageSuffix(parsed.path);
+        if (allowedCollections.length > 0 && !allowedCollections.includes(col)) continue;
+        // Every segment is walked against the schema; an invalid deep leaf
+        // would otherwise reach the API, 403, and blank the whole view.
+        const validation = validateDeepPath(col, path, fieldsStore, describeHop);
+        if (!validation.valid) {
+          warnOnce(
+            `[super-layout-table] Dropped template field "item:${col}.${path}" (M2A item: ${validation.reason})`
+          );
+          continue;
+        }
+        add(buildM2AFieldPath(fieldKey, itemField, col, path));
+        // For a translations hop, also fetch its language column so the renderer
+        // can match the active language instead of falling back to the first row.
+        for (const langPath of collectTranslationLanguagePaths(path, col, describeHop)) {
+          add(buildM2AFieldPath(fieldKey, itemField, col, langPath));
+        }
+        continue;
+      }
+
+      const firstSegment = (tok.split('.')[0] ?? '') as string;
+      if (!firstSegment) continue;
+
+      if (hadPrefix) {
+        // Junction-level field (e.g. `treatment.sort`); every segment is
+        // walked against the junction schema so an unknown deep token never
+        // reaches the API and 403s.
+        if (junctionCollection) {
+          const junctionValidation = validateDeepPath(
+            junctionCollection,
+            tok,
+            fieldsStore,
+            describeHop
+          );
+          if (junctionValidation.valid) {
+            add(`${fieldKey}.${tok}`);
+          } else {
+            warnOnce(
+              `[super-layout-table] Dropped template field "${rawTok}" (M2A junction "${junctionCollection}": ${junctionValidation.reason})`
+            );
+          }
+        }
+        continue;
+      }
+
+      // Bare token → parent-level field (e.g. `code`), fetched at the top level.
+      // Walked per segment against the parent so a stray token is dropped, not 403'd.
+      const parentValidation = validateDeepPath(parentCollection, tok, fieldsStore, describeHop);
+      if (parentValidation.valid) {
+        add(tok);
+      } else {
+        warnOnce(
+          `[super-layout-table] Dropped template field "${tok}" (M2A parent "${parentCollection}": ${parentValidation.reason})`
+        );
+      }
+    }
+    return expanded;
+  }
+
+  if (isM2M) {
+    const relations = relationsStore.getRelationsForField(parentCollection, fieldKey);
+    const rel = relations?.[0];
+    const junctionField = rel?.meta?.junction_field as string | undefined;
+    const junctionCollection = rel?.collection as string | undefined;
+    if (!junctionField || !junctionCollection) {
+      return [];
+    }
+    const junctionFieldDef = fieldsStore.getField(junctionCollection, junctionField);
+    const targetCollection = junctionFieldDef?.schema?.foreign_key_table as string | undefined;
+    if (!targetCollection) return [];
+
+    const expanded: string[] = [];
+    for (const tok of tokens) {
+      const parts = tok.split('.');
+      // If user wrote the junction_field as the first segment already, strip it
+      // so we don't double-prefix.
+      const tokWithoutJunctionPrefix = parts[0] === junctionField ? parts.slice(1).join('.') : tok;
+      if (!tokWithoutJunctionPrefix) continue;
+      // Every segment is walked against the target schema; an invalid deep
+      // leaf would otherwise reach the API, 403, and blank the whole view.
+      const validation = validateDeepPath(
+        targetCollection,
+        tokWithoutJunctionPrefix,
+        fieldsStore,
+        describeHop
+      );
+      if (!validation.valid) {
+        warnOnce(
+          `[super-layout-table] Dropped template field "${tok}" (M2M target "${targetCollection}": ${validation.reason})`
+        );
+        continue;
+      }
+      expanded.push(`${fieldKey}.${junctionField}.${tokWithoutJunctionPrefix}`);
+    }
+    return expanded;
+  }
+
+  // M2O / O2M / files: direct paths, validated against related_collection.
+  const relations = relationsStore.getRelationsForField(parentCollection, fieldKey);
+  const rel = relations?.[0];
+  const target =
+    (rel?.related_collection as string | undefined) ?? (rel?.collection as string | undefined);
+  if (!target) {
+    // Best-effort: return as-is when we have no target info to validate against.
+    // M2A is handled above; never reach the wrong-collection emit for it.
+    return isM2A ? [] : tokens.map((tok) => `${fieldKey}.${tok}`);
+  }
+
+  const expanded: string[] = [];
+  for (const tok of tokens) {
+    // Every segment is walked against the related collection; an invalid deep
+    // leaf would otherwise reach the API, 403, and blank the whole view.
+    const validation = validateDeepPath(target, tok, fieldsStore, describeHop);
+    if (!validation.valid) {
+      warnOnce(
+        `[super-layout-table] Dropped template field "${tok}" (relation target "${target}": ${validation.reason})`
+      );
+      continue;
+    }
+    expanded.push(`${fieldKey}.${tok}`);
+  }
+  return expanded;
+}
+
 /**
  * Adjusts fields based on their display configuration, following the original Directus pattern.
  * This function replicates the core logic from Directus core for proper display field resolution.
  * Enhanced with field existence validation to prevent requesting non-existent fields.
  */
+// Module-level store cache. `useStores()` only works inside an active Vue
+// setup context. When `adjustFieldsForDisplays` is invoked from a reactive
+// recomputation (e.g. our `aliasedFields` computed reruns after columnDisplays
+// changes), the call may be outside the setup window — useStores() throws and
+// the function would otherwise fall back to returning the raw input fields,
+// which silently drops all path-expansion (override / heuristic / display).
+// We capture the singleton stores on the first successful call and reuse them.
+let cachedFieldsStore: any = null;
+let cachedRelationsStore: any = null;
+
+function ensureStores(): { fieldsStore: any; relationsStore: any } {
+  if (cachedFieldsStore && cachedRelationsStore) {
+    return { fieldsStore: cachedFieldsStore, relationsStore: cachedRelationsStore };
+  }
+  try {
+    const { useFieldsStore, useRelationsStore } = useStores();
+    cachedFieldsStore = useFieldsStore();
+    cachedRelationsStore = useRelationsStore();
+  } catch {
+    /* stores not yet available — caller falls back to returning raw fields */
+  }
+  return { fieldsStore: cachedFieldsStore, relationsStore: cachedRelationsStore };
+}
+
 export function adjustFieldsForDisplays(
   fields: readonly string[],
   parentCollection: string,
-  providedFieldsStore?: any,
-  providedRelationsStore?: any
+  overrides: Record<string, ColumnDisplay> = {}
 ): string[] {
-  // Get the stores, but handle the case where they're not available
-  let fieldsStore: any = providedFieldsStore ?? null;
-  let relationsStore: any = providedRelationsStore ?? null;
-
-  if (!fieldsStore || !relationsStore) {
-    try {
-      const { useFieldsStore, useRelationsStore } = useStores();
-      fieldsStore = fieldsStore ?? useFieldsStore();
-      relationsStore = relationsStore ?? useRelationsStore();
-    } catch {
-      // Stores not available, return original fields
-      return [...fields];
-    }
-  }
-
+  const { fieldsStore, relationsStore } = ensureStores();
   if (!fieldsStore) return [...fields];
 
   const adjustedFields: string[] = fields
     .map((fieldKey) => {
+      // Issue #48: Override branch
+      //
+      // Storage normalization: layoutOptions.columnDisplays uses the *root* key
+      // (translations.title), but layoutQuery.fields entries can carry a language
+      // suffix (translations.title:de-DE). Strip the suffix before lookup so a
+      // single override applies to every language column for the same root field.
+      const storageKey = stripLanguageSuffix(fieldKey);
+      const override = overrides[storageKey];
+      if (override?.template) {
+        const tokens = parseTemplateTokens(override.template);
+        if (tokens.length === 0) return fieldKey;
+
+        const fieldDef = fieldsStore.getField(parentCollection, fieldKey);
+
+        // Plain field: tokens are already resolved at the parent level — return fieldKey
+        // (the template references the field's own value; no path expansion needed).
+        if (!isRelational(fieldDef)) {
+          return fieldKey;
+        }
+
+        const expanded = expandTokensThroughRelation(
+          fieldDef,
+          fieldKey,
+          parentCollection,
+          tokens,
+          fieldsStore,
+          relationsStore
+        );
+        return expanded.length > 0 ? expanded : [fieldKey];
+      }
+
+      // Heuristic branch (Issue #48): when no override exists, the field is
+      // relational, AND no field-settings display is configured, derive a sensible
+      // template via pickHeuristic and expand API paths the same way as override.
+      const fieldDefForHeuristic = fieldsStore.getField(parentCollection, fieldKey);
+      if (
+        fieldDefForHeuristic &&
+        !fieldDefForHeuristic.meta?.display &&
+        isRelational(fieldDefForHeuristic) &&
+        !fieldDefForHeuristic.meta?.special?.includes('translations')
+      ) {
+        const heuristicTemplate = relationsStore
+          ? pickHeuristic(fieldDefForHeuristic, relationsStore as any, fieldsStore as any)
+          : null;
+        if (heuristicTemplate) {
+          const heuristicTokens = parseTemplateTokens(heuristicTemplate);
+          if (heuristicTokens.length > 0) {
+            const expanded = expandTokensThroughRelation(
+              fieldDefForHeuristic,
+              fieldKey,
+              parentCollection,
+              heuristicTokens,
+              fieldsStore,
+              relationsStore
+            );
+            return expanded.length > 0 ? expanded : [fieldKey];
+          }
+        }
+      }
+
       const field = fieldsStore.getField(parentCollection, fieldKey);
 
       if (!field) {
@@ -200,19 +472,77 @@ export function adjustFieldsForDisplays(
         // Handle different display types with their specific field requirements
         switch (displayId) {
           case 'related-values': {
-            // For related-values, we need fields for the template
             const template = field.meta?.display_options?.template;
+            const isM2A = field.meta?.special?.includes('m2a') === true;
             if (template) {
-              // Parse template to extract field requirements
-              const templateFields = extractFieldsFromTemplate(template);
-              displayFields = templateFields.map((f) => `${fieldKey}.${f}`);
+              // M2A tokens use the "item:collection.field" form whose colon/dot
+              // structure must stay intact, so use the prefix-preserving parser;
+              // other relation types keep the last-segment flattener.
+              const templateTokens = isM2A
+                ? parseTemplateTokens(template)
+                : extractFieldsFromTemplate(template);
+              const expanded = expandTokensThroughRelation(
+                field,
+                fieldKey,
+                parentCollection,
+                templateTokens,
+                fieldsStore,
+                relationsStore
+              );
+
+              // PK path so the row can be keyed; M2M needs the junction prefix.
+              // M2A already carries its discriminator from the expander, and its
+              // per-collection PKs differ per target, so it needs no extra PK here.
+              const isM2M = field.meta?.special?.includes('m2m') === true;
+              let pkPath: string | null = null;
+              if (isM2A) {
+                pkPath = null;
+              } else if (isM2M) {
+                const relations = relationsStore.getRelationsForField(parentCollection, fieldKey);
+                const rel = relations?.[0];
+                const junctionField = rel?.meta?.junction_field as string | undefined;
+                const junctionCollection = rel?.collection as string | undefined;
+                if (junctionField && junctionCollection) {
+                  const junctionFieldDef = fieldsStore.getField(junctionCollection, junctionField);
+                  const targetCollection = junctionFieldDef?.schema?.foreign_key_table as
+                    | string
+                    | undefined;
+                  if (targetCollection) {
+                    const targetPk = getPrimaryKeyForCollection(targetCollection);
+                    pkPath = `${fieldKey}.${junctionField}.${targetPk}`;
+                  }
+                }
+              } else {
+                const rootField = (fieldKey.split('.')[0] ?? fieldKey) as string;
+                const relatedCollection = getRelatedCollection(
+                  parentCollection,
+                  rootField,
+                  relationsStore
+                );
+                if (relatedCollection) {
+                  const targetPk = getPrimaryKeyForCollection(relatedCollection);
+                  pkPath = `${fieldKey}.${targetPk}`;
+                }
+              }
+
+              displayFields =
+                pkPath && !expanded.includes(pkPath) ? [...expanded, pkPath] : expanded;
+              if (displayFields.length === 0) displayFields = [fieldKey];
+            } else if (isM2A) {
+              // No template: the junction discriminator alone is servable; the
+              // bare alias would request invalid columns on the junction.
+              const discriminator = resolveM2ARelation(
+                parentCollection,
+                fieldKey,
+                relationsStore,
+                fieldsStore
+              )?.discriminator;
+              displayFields = discriminator ? [`${fieldKey}.${discriminator}`] : [fieldKey];
             } else {
-              // Default fields for related-values without template
-              // Get the primary key of the related collection
-              const fieldName = fieldKey.split('.')[0];
+              const rootField = (fieldKey.split('.')[0] ?? fieldKey) as string;
               const relatedCollection = getRelatedCollection(
                 parentCollection,
-                fieldName,
+                rootField,
                 relationsStore
               );
               const pkField = getPrimaryKeyForCollection(relatedCollection);

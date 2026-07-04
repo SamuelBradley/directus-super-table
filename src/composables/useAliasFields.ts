@@ -4,6 +4,11 @@ import { get } from '@directus/utils';
 // CORE IMPORTS
 import { adjustFieldsForDisplays } from '../utils/adjustFieldsForDisplays';
 
+interface ColumnDisplayLike {
+  template: string;
+  display?: string;
+}
+
 export type AliasFields =
   | {
       fieldName: string;
@@ -30,19 +35,22 @@ type UsableAliasFields = {
  * Generates aliases for field collisions when fetching the data for each display.
  * @param fields This list of fields to be aliased
  * @param collection The collection the fields belong to
+ * @param overrides Optional per-column display overrides (issue #48).
+ *                  Forwarded to `adjustFieldsForDisplays` so template tokens
+ *                  in overrides expand into deep API field requests.
  * @returns Info about the display fields and if the original fields were aliased
  */
 export function useAliasFields(
   fields: Ref<string[]> | string[],
   collection: Ref<string | null> | string | null,
-  fieldsStore?: any,
-  relationsStore?: any
+  overrides?: Ref<Record<string, ColumnDisplayLike>> | Record<string, ColumnDisplayLike>
 ): UsableAliasFields {
   const aliasedFields = computed(() => {
     const aliasedFields: Record<string, AliasFields> = {};
 
     const _fields = unref(fields);
     const _collection = unref(collection);
+    const _overrides = unref(overrides) ?? {};
 
     if (!_fields || _fields.length === 0 || !_collection) return aliasedFields;
 
@@ -72,7 +80,7 @@ export function useAliasFields(
         aliasedFields[field] = {
           key: field,
           fieldName,
-          fields: adjustFieldsForDisplays([field], _collection, fieldsStore, relationsStore),
+          fields: adjustFieldsForDisplays([field], _collection, _overrides),
           aliased: false,
         };
       } else {
@@ -81,7 +89,7 @@ export function useAliasFields(
         aliasedFields[field] = {
           key: field,
           fieldName,
-          fields: adjustFieldsForDisplays([field], _collection, fieldsStore, relationsStore),
+          fields: adjustFieldsForDisplays([field], _collection, _overrides),
           aliased: false,
         };
       }
@@ -123,6 +131,9 @@ export function useAliasFields(
     const aliasInfo = Object.values(aliasedFields.value).find((field) => field.key === key);
 
     // Skip any nested fields prefixed with $ as they dont exist. ($thumbnail as an example)
+    // NOTE: deliberately NOT splitPathSegments (resolveRelationalPath.ts) — this
+    // normalizes a lookup key for `get(item, key)` (no trim, empty segments kept,
+    // string result), it does not tokenize a schema walk.
     key = key.includes('.')
       ? key
           .split('.')
