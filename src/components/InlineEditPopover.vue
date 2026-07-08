@@ -30,7 +30,7 @@
           @click="handleCellClick(toggle)"
         >
           <!-- Cell Content Display -->
-          <div class="cell-display">
+          <div class="cell-display" :title="hoverDisplayTitle">
             <!-- Show spinner when saving -->
             <v-progress-circular v-if="saving" indeterminate small color="var(--primary)" />
             <!-- Show content when not saving -->
@@ -371,7 +371,7 @@
     <!-- Non-editable or relational cell -->
     <div v-else class="edit-cell non-editable">
       <!-- Cell Content Display -->
-      <div class="cell-display">
+      <div class="cell-display" :title="hoverDisplayTitle">
         <!-- Show spinner when saving -->
         <v-progress-circular v-if="saving" indeterminate small color="var(--primary)" />
         <!-- Show content when not saving -->
@@ -491,6 +491,17 @@ const displayValue = computed(() => {
   // Don't convert boolean to string here, let render-display handle it
   if (props.value === null || props.value === undefined) return null;
   return props.value;
+});
+
+const hoverDisplayTitle = computed(() => {
+  const value = displayValue.value;
+  if (value === null || value === undefined) return undefined;
+
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return formatDisplayValue(value);
+
+  return undefined;
 });
 
 const inputType = computed(() => {

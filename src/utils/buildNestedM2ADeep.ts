@@ -105,13 +105,14 @@ interface RelationsStoreLike {
  * its rows joined (EditableCellRelational), so it is fetched unbounded
  * (`_limit:-1`) — capping would silently truncate the displayed list; the same
  * policy the nested builder applies via `TO_MANY_KINDS`. Trade-off: a column on
- * a very large o2m/m2m relation fetches every row. To-one fetches all fields;
- * scalar/unknown (incl. an unhydrated-store throw, self-heals on recompute)
+ * a very large o2m/m2m relation fetches every row. To-one relations are NOT
+ * expanded via deep here: explicit dotted `fields` already fetch what we need,
+ * and adding `deep[relation][_fields]=*` inflates payloads significantly.
+ * Scalar/unknown (incl. an unhydrated-store throw, self-heals on recompute)
  * gets no entry.
  */
 function deepEntryForKind(kind: HopKind): Record<string, any> | null {
   if (TO_MANY_KINDS.has(kind)) return { _fields: ['*'], _limit: -1 };
-  if (kind === 'm2o' || kind === 'file') return { _fields: ['*'] };
   return null;
 }
 

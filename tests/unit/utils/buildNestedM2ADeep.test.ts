@@ -199,11 +199,9 @@ describe('buildDeep', () => {
     });
   });
 
-  it('fetches all fields without _limit for a to-one m2o root', () => {
+  it('does not emit deep entries for to-one m2o roots (explicit fields already cover them)', () => {
     const { fieldsStore, relationsStore } = makeStores({ 'orders.user_created': { special: ['m2o'] } });
-    expect(buildDeep(['user_created.first_name'], [], 'orders', fieldsStore, relationsStore)).toEqual({
-      user_created: { _fields: ['*'] },
-    });
+    expect(buildDeep(['user_created.first_name'], [], 'orders', fieldsStore, relationsStore)).toBeUndefined();
   });
 
   it('unbounds a to-many m2m/o2m/files root (one source of truth with the nested builder)', () => {
@@ -226,11 +224,9 @@ describe('buildDeep', () => {
     expect(buildDeep(['meta_json.foo'], [], 'orders', fieldsStore, relationsStore)).toBeUndefined();
   });
 
-  it('treats a dotted file root as to-one (all fields, no _limit)', () => {
+  it('does not emit deep entries for to-one file roots', () => {
     const { fieldsStore, relationsStore } = makeStores({ 'orders.cover': { special: ['file'] } });
-    expect(buildDeep(['cover.title'], [], 'orders', fieldsStore, relationsStore)).toEqual({
-      cover: { _fields: ['*'] },
-    });
+    expect(buildDeep(['cover.title'], [], 'orders', fieldsStore, relationsStore)).toBeUndefined();
   });
 
   it('classifies bare relational fields by kind', () => {
@@ -252,10 +248,8 @@ describe('buildDeep', () => {
       )
     ).toEqual({
       treatment: { _fields: ['*'], _limit: -1 },
-      author: { _fields: ['*'] },
       lines: { _fields: ['*'], _limit: -1 },
       translations: { _fields: ['*'], _limit: -1 },
-      cover: { _fields: ['*'] },
       gallery: { _fields: ['*'], _limit: -1 },
     });
   });

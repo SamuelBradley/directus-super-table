@@ -23,6 +23,14 @@ function fieldsStore(byCollection: Record<string, Record<string, Field>>) {
   };
 }
 
+function relationsStore(byCollectionField: Record<string, any[]>) {
+  return {
+    getRelationsForField: vi.fn((collection: string, fieldKey: string) => {
+      return byCollectionField[`${collection}.${fieldKey}`] ?? [];
+    }),
+  };
+}
+
 describe('buildSearchFilter — characterization (current behavior)', () => {
   it('returns null for empty / whitespace-only queries', () => {
     const args = {
@@ -112,7 +120,7 @@ describe('buildSearchFilter — characterization (current behavior)', () => {
     });
   });
 
-  it('handles dot-notation for non-translation relations as direct _icontains', () => {
+  it('handles dot-notation for non-translation relations as nested _icontains filters', () => {
     const result = buildSearchFilter({
       query: 'Berg',
       visibleFields: ['author.email'],
@@ -121,7 +129,15 @@ describe('buildSearchFilter — characterization (current behavior)', () => {
       fieldsStore: fieldsStore({}),
     });
 
-    expect(result).toEqual({ _or: [{ 'author.email': { _icontains: 'Berg' } }] });
+    expect(result).toEqual({
+      _or: [
+        {
+          author: {
+            email: { _icontains: 'Berg' },
+          },
+        },
+      ],
+    });
   });
 
   it('strips language suffix and deduplicates fields across multi-language columns', () => {
@@ -247,6 +263,135 @@ describe('buildSearchFilter — characterization (current behavior)', () => {
     });
 
     expect(result).toBeNull();
+  });
+
+  it('searches directus user relation roots through first_name/last_name/email instead of the root field', () => {
+    const userCreated = field({
+      field: 'user_created',
+      type: 'string',
+      meta: { special: ['m2o'] } as any,
+    });
+
+    const result = buildSearchFilter({
+      query: 'coss',
+      visibleFields: ['user_created'],
+      fieldsInCollection: [userCreated],
+      collection: 'person_index',
+      fieldsStore: fieldsStore({
+        person_index: { user_created: userCreated },
+      }),
+      relationsStore: relationsStore({
+        'person_index.user_created': [
+          {
+            collection: 'person_index',
+            field: 'user_created',
+            related_collection: 'directus_users',
+          },
+        ],
+      }),
+    });
+
+    expect(result).toEqual({
+      _or: [
+        { user_created: { first_name: { _icontains: 'coss' } } },
+        { user_created: { last_name: { _icontains: 'coss' } } },
+        { user_created: { email: { _icontains: 'coss' } } },
+      ],
+    });
+  });
+
+  it('builds nested filter objects for dotted visible relation paths', () => {
+    const placeName = field({ field: 'place_name', type: 'string', meta: { special: ['m2o'] } as any });
+    const ghostCommunity = field({ field: 'ghost_community', type: 'string', meta: { special: ['m2o'] } as any });
+    const location = field({ field: 'location', type: 'string', meta: { special: ['m2o'] } as any });
+    const name = field({ field: 'name', type: 'string' });
+
+    const result = buildSearchFilter({
+      query: 'berg',
+      visibleFields: ['place_name.ghost_community.location.name'],
+      fieldsInCollection: [placeName],
+      collection: 'person_index',
+      fieldsStore: fieldsStore({
+        person_index: { place_name: placeName },
+        place_name: { ghost_community: ghostCommunity },
+        ghost_community: { location },
+        location: { name },
+      }),
+      relationsStore: relationsStore({
+        'person_index.place_name': [{ collection: 'person_index', field: 'place_name', related_collection: 'place_name' }],
+        'place_name.ghost_community': [{ collection: 'place_name', field: 'ghost_community', related_collection: 'ghost_community' }],
+        'ghost_community.location': [{ collection: 'ghost_community', field: 'location', related_collection: 'location' }],
+      }),
+    });
+
+    expect(result).toEqual({
+      _or: [
+        {
+          place_name: {
+            ghost_community: {
+              location: {
+                name: { _icontains: 'berg' },
+              },
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  it('skips control fields such as the custom save as copy helper field', () => {
+    const saveAsCopyField = field({
+      field: 'custom_save_as_copy-pb01aq',
+      type: 'string',
+      meta: { interface: 'custom_save_as_copy' } as any,
+    });
+
+    const result = buildSearchFilter({
+      query: 'n',
+      visibleFields: ['custom_save_as_copy-pb01aq'],
+      fieldsInCollection: [saveAsCopyField],
+      collection: 'person_index',
+      fieldsStore: fieldsStore({
+        person_index: { 'custom_save_as_copy-pb01aq': saveAsCopyField },
+      }),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('does not add hidden-pass root _icontains clauses for non-visible user_updated relations', () => {
+    const familyName = field({ field: 'family_name', type: 'string' });
+    const userUpdated = field({
+      field: 'user_updated',
+      type: 'string',
+      meta: {} as any,
+    });
+
+    const result = buildSearchFilter({
+      query: 'n.d.',
+      visibleFields: ['family_name'],
+      fieldsInCollection: [familyName, userUpdated],
+      collection: 'person_index',
+      fieldsStore: fieldsStore({
+        person_index: {
+          family_name: familyName,
+          user_updated: userUpdated,
+        },
+      }),
+      relationsStore: relationsStore({
+        'person_index.user_updated': [
+          {
+            collection: 'person_index',
+            field: 'user_updated',
+            related_collection: 'directus_users',
+          },
+        ],
+      }),
+    });
+
+    expect(result).toEqual({
+      _or: [{ family_name: { _icontains: 'n.d.' } }],
+    });
   });
 });
 
@@ -610,9 +755,17 @@ describe('buildSearchFilter — top-level translations alias (#24 Sub-Bug B fix)
         ]),
       },
       relationsStore: {
-        getRelationsForField: vi.fn(() => [
-          { collection: 'posts_translations', meta: { many_collection: 'posts_translations' } },
-        ]),
+        getRelationsForField: vi.fn((coll: string, key: string) => {
+          if (coll === 'posts' && key === 'translations') {
+            return [
+              {
+                collection: 'posts_translations',
+                meta: { many_collection: 'posts_translations' },
+              },
+            ];
+          }
+          return [];
+        }),
       },
     });
 

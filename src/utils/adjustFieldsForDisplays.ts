@@ -63,25 +63,14 @@ function isSystemUserAuditField(field: any, fieldKey: string): boolean {
   return fieldName === 'user_created' || fieldName === 'user_updated';
 }
 
-function getUserDisplayFields(fieldKey: string, fieldsStore: any): string[] {
+function getUserDisplayFields(fieldKey: string, _fieldsStore: any): string[] {
   const userPkField = getPrimaryKeyForCollection('directus_users');
-  const displayFields = [
+  return [
     `${fieldKey}.${userPkField}`,
     `${fieldKey}.email`,
     `${fieldKey}.first_name`,
     `${fieldKey}.last_name`,
   ];
-
-  if (fieldExists('directus_users', 'avatar', fieldsStore)) {
-    const avatarPkField = getPrimaryKeyForCollection('directus_files');
-    displayFields.push(`${fieldKey}.avatar.${avatarPkField}`);
-
-    if (fieldExists('directus_files', 'modified_on', fieldsStore)) {
-      displayFields.push(`${fieldKey}.avatar.modified_on`);
-    }
-  }
-
-  return displayFields;
 }
 
 /**

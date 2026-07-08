@@ -13,6 +13,7 @@ export interface ApiOptions {
   limit?: number;
   deep?: Record<string, any>;
   alias?: Record<string, string>;
+  meta?: string[];
 }
 
 export interface ApiResponse {
@@ -44,24 +45,49 @@ export function useTableApi() {
     error.value = null;
 
     try {
-      const params: any = {
-        fields: options.fields,
-        page: options.page || 1,
-        limit: options.limit || 100,
+      const buildParams = (includeMeta: boolean) => {
+        const params: any = {
+          fields: options.fields,
+          page: options.page || 1,
+          limit: options.limit || 100,
+        };
+        if (options.filter) params.filter = options.filter;
+        // The main listing path drives search through `filter` (intelligent _or);
+        // this `search` param stays for other callers (e.g. export).
+        if (options.search) params.search = options.search;
+        if (options.sort && options.sort.length > 0) params.sort = options.sort;
+        if (options.deep) params.deep = options.deep;
+        if (options.alias) params.alias = options.alias;
+        if (includeMeta && options.meta && options.meta.length > 0) {
+          params.meta = options.meta;
+        }
+        return params;
       };
-      if (options.filter) params.filter = options.filter;
-      // The main listing path drives search through `filter` (intelligent _or);
-      // this `search` param stays for other callers (e.g. export).
-      if (options.search) params.search = options.search;
-      if (options.sort && options.sort.length > 0) params.sort = options.sort;
-      if (options.deep) params.deep = options.deep;
-      if (options.alias) params.alias = options.alias;
 
-      const response = await api.get(`/items/${options.collection}`, { params });
+      const request = async (includeMeta: boolean) => {
+        return api.get(`/items/${options.collection}`, { params: buildParams(includeMeta) });
+      };
+
+      let response;
+      try {
+        response = await request(true);
+      } catch (err) {
+        // Some permission models reject meta counts on the main listing request.
+        // Retry rows without meta so the list still loads; callers can hide
+        // stats when meta isn't present.
+        if (options.meta && options.meta.length > 0) {
+          response = await request(false);
+        } else {
+          throw err;
+        }
+      }
 
       if (response.data) {
         items.value = response.data.data || [];
-        return { data: items.value };
+        return {
+          data: items.value,
+          meta: response.data.meta,
+        };
       }
 
       return { data: [] };

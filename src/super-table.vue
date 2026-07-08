@@ -5,11 +5,14 @@
     <div class="table-toolbar" v-if="showToolbar">
       <div class="toolbar-content">
         <div class="search-input">
-          <v-input v-model="searchQuery" type="search" :placeholder="t('search_items')">
+          <v-input v-model="searchQuery" type="search" placeholder="Quick search">
             <template #prepend>
               <v-icon name="search" />
             </template>
-            <template #append v-if="searchQuery">
+            <template #append v-if="isSearchUpdating">
+              <v-progress-circular indeterminate x-small />
+            </template>
+            <template #append v-else-if="searchQuery">
               <v-icon name="close" clickable @click="searchQuery = ''" />
             </template>
           </v-input>
@@ -30,6 +33,10 @@
           @move-preset="moveFilterPreset"
           @update-preset="updateFilterPreset"
         />
+
+        <div class="toolbar-stats" v-if="!loading && mainRequestFilterCount !== null">
+          {{ filteredCountLabel }}
+        </div>
       </div>
 
       <!-- Selection count -->
@@ -38,6 +45,40 @@
         {{ (selection?.value?.length || 0) === 1 ? 'item' : 'items' }} selected
       </div>
     </div>
+
+    <div class="top-pagination-bar" v-if="hasRenderableData">
+      <div class="top-pagination-actions">
+        <v-button
+          v-tooltip.bottom="'Refresh table'"
+          icon
+          rounded
+          secondary
+          :loading="isTableUpdating"
+          :disabled="isTableUpdating"
+          class="refresh-table-button"
+          @click="refreshItems"
+        >
+          <v-icon name="refresh" />
+        </v-button>
+      </div>
+
+      <div class="pagination">
+        <v-pagination
+          v-if="totalPages > 1"
+          v-model="page"
+          :length="totalPages"
+          :total-visible="7"
+          show-first-last
+          @update:model-value="toPage"
+        />
+      </div>
+
+      <div class="per-page">
+        <span>{{ t('per_page') }}:</span>
+        <v-select v-model="limit" :items="perPageOptions" inline />
+      </div>
+    </div>
+
     <!-- Main Table -->
     <v-table
       v-if="loading || hasRenderableData"
@@ -50,7 +91,7 @@
       must-sort
       :sort="tableSort"
       :items="items"
-      :loading="loading"
+      :loading="isTableUpdating"
       :item-key="getPrimaryKeyFieldName()"
       :show-manual-sort="sortAllowed"
       :manual-sort-key="sortFieldName"
@@ -276,7 +317,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, computed, toRefs, watch, unref, onMounted, onUnmounted, type Ref } from 'vue';
+import { ref, computed, toRefs, watch, unref, onMounted, onUnmounted, onActivated, type Ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { debounce } from 'lodash';
@@ -765,6 +806,7 @@ const editMode = computed({
 // only for forward-compatibility; the equality guards make it loop-safe
 // should Directus ever whitelist `search` as a writable layout prop.
 const searchQuery = ref('');
+const SEARCH_DEBOUNCE_MS = 500;
 // Debounced mirror that actually drives the request filter, so fast typing
 // fires one fetch after the user pauses instead of one per keystroke. Seeded
 // synchronously on preset hydration / native change (below) so a
@@ -772,7 +814,7 @@ const searchQuery = ref('');
 const debouncedSearchQuery = ref('');
 const applyDebouncedSearch = debounce((val: string) => {
   debouncedSearchQuery.value = val;
-}, 300);
+}, SEARCH_DEBOUNCE_MS);
 
 // Only the FIRST hydration must reflect into the request filter synchronously
 // (a preset-restored search has to filter the initial load — no unfiltered
@@ -806,7 +848,9 @@ const onSearchInput = debounce((val: string) => {
   if ((search?.value ?? null) !== outgoing) {
     emit('update:search', outgoing);
   }
-}, 300);
+}, SEARCH_DEBOUNCE_MS);
+
+const isSearchPending = computed(() => searchQuery.value !== debouncedSearchQuery.value);
 
 // Computed search filter — reads the DEBOUNCED query so the request lags
 // typing by one debounce window instead of recomputing per keystroke.
@@ -939,12 +983,26 @@ const loading = tableApi.loading;
 const error = tableApi.error;
 // Use our own items ref for local state management (like Directus does)
 const items = ref<Item[]>([]);
-const itemCount = tableApi.filterCount;
+const itemCount = ref(0);
+const mainRequestFilterCount = ref<number | null>(null);
+const isRefreshing = ref(false);
+let activeItemsRequestId = 0;
+let activeCountRequestId = 0;
+
+const isTableUpdating = computed(() => loading.value || isRefreshing.value);
+const isSearchUpdating = computed(
+  () => isSearchPending.value || (isTableUpdating.value && debouncedSearchQuery.value.length > 0)
+);
 
 // Calculate totalPages
 const totalPages = computed(() => {
   if (!itemCount.value || !limit.value) return 1;
   return Math.ceil(itemCount.value / limit.value);
+});
+
+const filteredCountLabel = computed(() => {
+  const count = Number(mainRequestFilterCount.value ?? 0).toLocaleString();
+  return `${count} ${count === '1' ? 'item' : 'items'} in filter`;
 });
 
 // A failed items fetch leaves the count populated (separate request), so gate
@@ -958,26 +1016,50 @@ const hasRenderableData = computed(
 // resolves via `countDistinct(pk)` server-side and would 403, while
 // `aggregate[count]=*` (used by `fetchItemCount`) does not.
 async function getItems() {
+  const requestId = ++activeItemsRequestId;
+  isRefreshing.value = true;
+
   try {
-    const [itemsResult] = await Promise.all([
-      tableApi.fetchItems({
-        collection: collection.value,
-        fields: fieldsWithRelational.value,
-        filter: combinedFilter.value,
-        sort: sort.value,
-        page: page.value,
-        limit: limit.value,
-        deep: deep.value,
-        alias: aliasQuery.value || undefined,
-      }),
-      tableApi
-        .fetchItemCount(collection.value, combinedFilter.value, undefined, getPrimaryKeyFieldName())
-        .catch(() => undefined),
-    ]);
+    const itemsResult = await tableApi.fetchItems({
+      collection: collection.value,
+      fields: fieldsWithRelational.value,
+      filter: combinedFilter.value,
+      sort: sort.value,
+      page: page.value,
+      limit: limit.value,
+      deep: deep.value,
+      alias: aliasQuery.value || undefined,
+      meta: ['filter_count'],
+    });
+
+    if (requestId !== activeItemsRequestId) {
+      return;
+    }
+
     items.value = itemsResult?.data || [];
+    mainRequestFilterCount.value =
+      typeof itemsResult?.meta?.filter_count === 'number' ? itemsResult.meta.filter_count : null;
   } catch {
     // Items error already in tableApi.error; count is best-effort
+  } finally {
+    if (requestId === activeItemsRequestId) {
+      isRefreshing.value = false;
+    }
   }
+}
+
+async function getItemCount() {
+  const requestId = ++activeCountRequestId;
+
+  const count = await tableApi
+    .fetchItemCount(collection.value, combinedFilter.value, undefined, getPrimaryKeyFieldName())
+    .catch(() => itemCount.value);
+
+  if (requestId !== activeCountRequestId) {
+    return;
+  }
+
+  itemCount.value = count;
 }
 
 // Every refetch funnels through ONE runner: same-tick watcher storms collapse
@@ -987,6 +1069,7 @@ async function getItems() {
 // directly and therefore bypass the fingerprint dedupe on purpose: same
 // params, but server data changed.
 const scheduleGetItems = createCoalescedRunner(getItems);
+const scheduleGetItemCount = createCoalescedRunner(getItemCount);
 
 // Create a wrapper function for getItems
 async function refreshItems() {
@@ -1015,11 +1098,28 @@ const queryFingerprint = computed(() =>
   })
 );
 
+const countFingerprint = computed(() =>
+  buildQueryFingerprint({
+    collection: collection.value,
+    fields: [],
+    filter: combinedFilter.value,
+    sort: null,
+    page: 1,
+    limit: 1,
+    deep: null,
+    alias: null,
+  })
+);
+
 watch(queryFingerprint, () => {
   // Don't refetch during manual sorting (same guard as before)
   if (!isManualSorting) {
     scheduleGetItems();
   }
+});
+
+watch(countFingerprint, () => {
+  scheduleGetItemCount();
 });
 
 // Handle select all toggle
@@ -1335,10 +1435,16 @@ function handleRefreshCollectionEvent(event: any) {
   }
 }
 
+function handleWindowFocus() {
+  scheduleGetItems();
+  scheduleGetItemCount();
+}
+
 onMounted(() => {
   // Initial load: presets first, then items.
   loadPresets();
   scheduleGetItems();
+  scheduleGetItemCount();
 
   // All window listeners in one place; named handlers so onUnmounted removes the
   // SAME references (inline arrows would make the removals silent no-ops).
@@ -1346,6 +1452,16 @@ onMounted(() => {
   window.addEventListener('directus-items-duplicated', handleItemsDuplicated);
   window.addEventListener('items-deleted', handleItemsDeletedEvent);
   window.addEventListener('refresh-collection', handleRefreshCollectionEvent);
+  window.addEventListener('focus', handleWindowFocus);
+});
+
+// Directus keeps collection views alive while navigating to item detail pages.
+// When the user returns after creating, updating, or deleting an item, the
+// layout instance is often re-activated rather than re-mounted, so the list can
+// stay stale unless we explicitly refresh here.
+onActivated(() => {
+  scheduleGetItems();
+  scheduleGetItemCount();
 });
 
 onUnmounted(() => {
@@ -1353,6 +1469,7 @@ onUnmounted(() => {
   window.removeEventListener('directus-items-duplicated', handleItemsDuplicated);
   window.removeEventListener('items-deleted', handleItemsDeletedEvent);
   window.removeEventListener('refresh-collection', handleRefreshCollectionEvent);
+  window.removeEventListener('focus', handleWindowFocus);
 });
 </script>
 
@@ -1371,9 +1488,16 @@ onUnmounted(() => {
 
 .toolbar-content {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.toolbar-stats {
+  margin-left: auto;
+  color: var(--foreground-subdued);
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .search-input {
@@ -1391,6 +1515,22 @@ onUnmounted(() => {
   display: flex;
   gap: 8px;
   margin-left: auto;
+}
+
+.top-pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 2px var(--content-padding) 4px;
+  border-bottom: var(--border-width) solid var(--border-normal);
+}
+
+.top-pagination-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .table {
@@ -1586,7 +1726,7 @@ v-icon.edit-toggle.active {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 32px var(--content-padding);
+  padding: 16px var(--content-padding);
   border-top: var(--border-width) solid var(--border-normal);
 }
 
@@ -1599,6 +1739,19 @@ v-icon.edit-toggle.active {
   align-items: center;
   gap: 8px;
   color: var(--foreground-subdued);
+}
+
+@media (max-width: 900px) {
+  .top-pagination-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toolbar-stats {
+    width: 100%;
+    margin-left: 0;
+    text-align: right;
+  }
 }
 
 .flip {

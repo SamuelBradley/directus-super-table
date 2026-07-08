@@ -31,6 +31,19 @@ interface RelationsStoreLike {
     | undefined;
 }
 
+const NON_SEARCHABLE_SPECIALS = new Set([
+  'alias',
+  'no-data',
+  'm2o',
+  'o2m',
+  'm2m',
+  'm2a',
+  'files',
+  'translations',
+]);
+
+const NON_SEARCHABLE_INTERFACES = new Set(['custom-save-as-copy', 'custom_save_as_copy']);
+
 export interface BuildSearchFilterArgs {
   /** The user's raw search input. Empty/whitespace returns null. */
   query: string;
@@ -54,6 +67,90 @@ function isValidUUID(value: string): boolean {
 
 function isValidInteger(value: string): boolean {
   return /^\d+$/.test(value);
+}
+
+function buildNestedFieldCondition(fieldPath: string, operator: string, value: unknown): Filter {
+  const terminalCondition = { [operator]: value };
+
+  return fieldPath
+    .split('.')
+    .reduceRight<Record<string, unknown>>((acc, part) => ({ [part]: acc }), terminalCondition) as Filter;
+}
+
+function getFieldMetadataForPath(
+  collection: string,
+  fieldPath: string,
+  fieldsStore: FieldsStoreLike,
+  relationsStore?: RelationsStoreLike
+): Field | null {
+  const parts = fieldPath.split('.');
+  let currentCollection: string | null = collection;
+
+  for (let index = 0; index < parts.length; index++) {
+    const part = parts[index]!;
+    const field = fieldsStore.getField(currentCollection, part);
+
+    if (!field) return null;
+    if (index === parts.length - 1) return field;
+    if (!relationsStore) return null;
+
+    const relations = relationsStore.getRelationsForField(currentCollection!, part) ?? [];
+    const relation = relations[0];
+    const relatedCollection = relation?.related_collection || relation?.collection;
+
+    if (!relatedCollection || relatedCollection === currentCollection) return null;
+    currentCollection = relatedCollection;
+  }
+
+  return null;
+}
+
+function hasNonSearchableSpecial(field: Field): boolean {
+  const special = field.meta?.special;
+  return Array.isArray(special) && special.some((value) => NON_SEARCHABLE_SPECIALS.has(value));
+}
+
+function isNonSearchableControlField(field: Field): boolean {
+  const interfaceName = field.meta?.interface;
+  return interfaceName ? NON_SEARCHABLE_INTERFACES.has(interfaceName) : false;
+}
+
+function isDirectUserRelationField(
+  collection: string,
+  fieldKey: string,
+  field: Field,
+  relationsStore?: RelationsStoreLike
+): boolean {
+  if (!relationsStore) return false;
+
+  if (field.field === 'user_created' || field.field === 'user_updated') {
+    return true;
+  }
+
+  const relations = relationsStore.getRelationsForField(collection, fieldKey) ?? [];
+  return relations.some((relation) => relation.related_collection === 'directus_users');
+}
+
+function isUnhandledTopLevelRelationField(
+  collection: string,
+  fieldKey: string,
+  field: Field,
+  relationsStore?: RelationsStoreLike
+): boolean {
+  if (!relationsStore) return false;
+  if (isTranslationsAlias(field)) return false;
+  if (isDirectUserRelationField(collection, fieldKey, field, relationsStore)) return false;
+
+  const relations = relationsStore.getRelationsForField(collection, fieldKey) ?? [];
+  return relations.length > 0;
+}
+
+function buildDirectUserRelationClauses(fieldKey: string, searchValue: string): Filter[] {
+  return [
+    buildNestedFieldCondition(`${fieldKey}.first_name`, '_icontains', searchValue),
+    buildNestedFieldCondition(`${fieldKey}.last_name`, '_icontains', searchValue),
+    buildNestedFieldCondition(`${fieldKey}.email`, '_icontains', searchValue),
+  ] as Filter[];
 }
 
 /**
@@ -133,15 +230,31 @@ export function buildSearchFilter(args: BuildSearchFilterArgs): Filter | null {
           },
         });
       } else {
-        conditions.push({
-          [actualFieldKey]: { _icontains: searchValue },
-        });
+        const nestedFieldMeta = getFieldMetadataForPath(
+          collection,
+          actualFieldKey,
+          fieldsStore,
+          relationsStore
+        );
+
+        if (nestedFieldMeta?.type === 'uuid' && searchIsUUID) {
+          conditions.push(buildNestedFieldCondition(actualFieldKey, '_eq', searchValue));
+        } else if (nestedFieldMeta?.type === 'integer' && searchIsInteger) {
+          conditions.push(buildNestedFieldCondition(actualFieldKey, '_eq', searchAsInteger));
+        } else if (
+          !nestedFieldMeta ||
+          SEARCHABLE_TEXT_TYPES.includes(nestedFieldMeta.type as (typeof SEARCHABLE_TEXT_TYPES)[number])
+        ) {
+          conditions.push(buildNestedFieldCondition(actualFieldKey, '_icontains', searchValue));
+        }
       }
       return;
     }
 
     const field = fieldsStore.getField(collection, actualFieldKey);
     if (!field) return;
+
+    if (isNonSearchableControlField(field)) return;
 
     // Top-level translations alias — issue #24 Sub-Bug B fix.
     // Detect via `meta.special` so renamed aliases (e.g. `i18n`, `localizations`)
@@ -157,6 +270,17 @@ export function buildSearchFilter(args: BuildSearchFilterArgs): Filter | null {
       conditions.push(...translationsClauses);
       return;
     }
+
+    if (isDirectUserRelationField(collection, actualFieldKey, field, relationsStore)) {
+      conditions.push(...buildDirectUserRelationClauses(actualFieldKey, searchValue));
+      return;
+    }
+
+    if (isUnhandledTopLevelRelationField(collection, actualFieldKey, field, relationsStore)) {
+      return;
+    }
+
+    if (hasNonSearchableSpecial(field)) return;
 
     if (SEARCHABLE_TEXT_TYPES.includes(field.type as (typeof SEARCHABLE_TEXT_TYPES)[number])) {
       conditions.push({ [actualFieldKey]: { _icontains: searchValue } });
@@ -175,6 +299,22 @@ export function buildSearchFilter(args: BuildSearchFilterArgs): Filter | null {
   fieldsInCollection.forEach((field: Field) => {
     if (processedFields.has(field.field)) return;
     if (field.meta?.hidden === true) return;
+    if (isNonSearchableControlField(field)) return;
+
+    if (isDirectUserRelationField(collection, field.field, field, relationsStore)) {
+      // Hidden-field search is intentionally broad for scalar text columns, but
+      // relation roots should not be added implicitly: they either need explicit
+      // nested clauses (visible user fields) or should be skipped.
+      processedFields.add(field.field);
+      return;
+    }
+
+    if (isUnhandledTopLevelRelationField(collection, field.field, field, relationsStore)) {
+      processedFields.add(field.field);
+      return;
+    }
+
+    if (hasNonSearchableSpecial(field)) return;
 
     if (SEARCHABLE_TEXT_TYPES.includes(field.type as (typeof SEARCHABLE_TEXT_TYPES)[number])) {
       conditions.push({ [field.field]: { _icontains: searchValue } });

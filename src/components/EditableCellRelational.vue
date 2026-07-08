@@ -1,7 +1,65 @@
 <template>
+  <div
+    v-if="!isRelational && !props.editMode"
+    class="editable-cell non-editable"
+    :title="readOnlyHoverTitle"
+    :style="{ textAlign: props.align || 'left' }"
+  >
+    <ColorCell
+      v-if="
+        field?.interface === 'select-color' ||
+        field?.interface === 'color' ||
+        actualFieldKey.includes('color')
+      "
+      :value="displayValue"
+      :item="item"
+      :field="actualFieldKey"
+      :edit-mode="false"
+      :alignment="props.align"
+    />
+    <ImageCell
+      v-else-if="
+        field?.interface === 'file-image' ||
+        field?.interface === 'file' ||
+        field?.interface === 'image' ||
+        (field?.type === 'uuid' &&
+          (actualFieldKey.includes('image') ||
+            actualFieldKey.includes('photo') ||
+            actualFieldKey.includes('picture')))
+      "
+      :value="displayValue"
+      :item="item"
+      :field="actualFieldKey"
+      :alignment="align"
+    />
+    <span v-else-if="field?.display === 'user'" class="raw-value" :title="toHoverText(formatUserDisplay(displayValue))">
+      {{ formatUserDisplay(displayValue) }}
+    </span>
+    <render-display
+      v-else-if="resolvedDisplay.display !== null"
+      :value="displayValue"
+      :display="resolvedDisplay.display"
+      :options="resolvedDisplay.options"
+      :interface="field?.interface"
+      :interface-options="field?.interfaceOptions"
+      :type="field?.type"
+      :collection="field?.collection"
+      :field="field?.field"
+    />
+    <SelectCell
+      v-else-if="getInterfaceType() === 'select-dropdown'"
+      :value="displayValue"
+      :options="interfaceOptions"
+      :field="actualFieldKey"
+    />
+    <span v-else class="raw-value" :title="toHoverText(displayValue)">
+      {{ displayValue != null ? String(displayValue) : '—' }}
+    </span>
+  </div>
+
   <!-- Use InlineEditPopover with TagCell for tag fields -->
   <InlineEditPopover
-    v-if="!isRelational && shouldUseTagCell"
+    v-else-if="!isRelational && shouldUseTagCell"
     :value="displayValue"
     :field-key="actualFieldKey"
     :field-label="field?.name || actualFieldKey"
@@ -103,9 +161,13 @@
         :field="actualFieldKey"
         :alignment="align"
       />
+      <!-- Render user displays as text to avoid avatar/image UI in audit columns. -->
+      <span v-else-if="field?.display === 'user'" class="raw-value" :title="toHoverText(formatUserDisplay(value))">
+        {{ formatUserDisplay(value) }}
+      </span>
       <!-- ABSOLUTE PRIORITY: Resolved display via override → field → heuristic chain -->
       <render-display
-        v-if="resolvedDisplay.display !== null"
+        v-else-if="resolvedDisplay.display !== null"
         :value="value"
         :display="resolvedDisplay.display"
         :options="resolvedDisplay.options"
@@ -131,7 +193,7 @@
         :primary-key-field-name="primaryKeyField"
       />
       <!-- FINAL FALLBACK: Raw value display for fields without any special handling -->
-      <span v-else class="raw-value">
+      <span v-else class="raw-value" :title="toHoverText(value)">
         {{ value != null ? String(value) : '—' }}
       </span>
     </template>
@@ -167,14 +229,17 @@
     :style="{ textAlign: props.align || 'left' }"
   >
     <!-- Direct Display Value (already rendered in computed) -->
-    <span class="template-display">
+    <span
+      class="template-display"
+      :title="toHoverText(field?.display === 'user' ? formatUserDisplay(displayValue) : displayValue)"
+    >
       {{ field?.display === 'user' ? formatUserDisplay(displayValue) : displayValue }}
     </span>
   </div>
 
   <!-- FALLBACK: Display only for relational fields without display templates -->
   <div v-else class="editable-cell relational" :style="{ textAlign: props.align || 'left' }">
-    <span class="raw-value">
+    <span class="raw-value" :title="toHoverText(displayValue)">
       {{ displayValue != null ? String(displayValue) : '—' }}
     </span>
   </div>
@@ -310,6 +375,35 @@ const displayValue = computed(() => {
     );
   }
 
+  // User displays can arrive as object, scalar id, or be available only via
+  // aliased getter/cache depending on permissions and fetched fields.
+  if (props.field?.display === 'user') {
+    const rawValue = props.item[props.fieldKey];
+
+    if (rawValue && typeof rawValue === 'object') {
+      return rawValue;
+    }
+
+    if (props.getDisplayValue) {
+      const aliasedValue = props.getDisplayValue(props.item, props.fieldKey);
+
+      if (aliasedValue && typeof aliasedValue === 'object') {
+        return aliasedValue;
+      }
+
+      if (aliasedValue != null) {
+        return aliasedValue;
+      }
+    }
+
+    const cachedValue = relationalCache.value[props.fieldKey];
+    if (cachedValue) {
+      return cachedValue;
+    }
+
+    return rawValue ?? null;
+  }
+
   // Bare `translations` column (no sub-field, no `:lang`): render the active-
   // language row through the configured/heuristic template instead of raw JSON.
   // (selectedLanguage is never passed to the cell, so the active language is
@@ -423,6 +517,14 @@ const displayValue = computed(() => {
 
   // Simple field access
   return props.item[props.fieldKey];
+});
+
+const readOnlyHoverTitle = computed(() => {
+  if (props.field?.display === 'user') {
+    return toHoverText(formatUserDisplay(displayValue.value));
+  }
+
+  return toHoverText(displayValue.value);
 });
 
 const isM2AField = computed(() => isM2A(props.field));
@@ -731,6 +833,13 @@ function formatUserDisplay(value: any): string {
   return 'Unknown User';
 }
 
+function toHoverText(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return undefined;
+}
+
 function handleUpdate(value: any) {
   const itemId = props.item?.[primaryKeyField.value];
 
@@ -830,8 +939,8 @@ function navigateToPrevCell() {
 }
 
 .editable-cell.non-editable {
-  opacity: 0.7;
-  cursor: not-allowed !important;
+  opacity: 1;
+  cursor: inherit;
 }
 
 .lock-icon {
