@@ -16,6 +16,8 @@ export interface LayoutOptions {
   showToolbar?: boolean;
   showSelect?: boolean;
   spacing?: 'compact' | 'cozy' | 'comfortable';
+  searchAllFields?: boolean;
+  splitSearchTermsAcrossFields?: boolean;
   widths?: Record<string, number>;
   align?: Record<string, 'left' | 'center' | 'right'>;
   customFieldNames?: Record<string, string>;

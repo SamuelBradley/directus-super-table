@@ -55,6 +55,81 @@ describe('buildSearchFilter — characterization (current behavior)', () => {
     expect(result).toEqual({ _or: [{ name: { _icontains: 'hello' } }] });
   });
 
+  it('keeps the full multi-word query together by default', () => {
+    const result = buildSearchFilter({
+      query: 'john smith',
+      visibleFields: ['preferred_name', 'first_name', 'middle_name', 'last_name'],
+      fieldsInCollection: [
+        field({ field: 'preferred_name', type: 'string' }),
+        field({ field: 'first_name', type: 'string' }),
+        field({ field: 'middle_name', type: 'string' }),
+        field({ field: 'last_name', type: 'string' }),
+      ],
+      collection: 'people',
+      fieldsStore: fieldsStore({
+        people: {
+          preferred_name: field({ field: 'preferred_name', type: 'string' }),
+          first_name: field({ field: 'first_name', type: 'string' }),
+          middle_name: field({ field: 'middle_name', type: 'string' }),
+          last_name: field({ field: 'last_name', type: 'string' }),
+        },
+      }),
+    });
+
+    expect(result).toEqual({
+      _or: [
+        { preferred_name: { _icontains: 'john smith' } },
+        { first_name: { _icontains: 'john smith' } },
+        { middle_name: { _icontains: 'john smith' } },
+        { last_name: { _icontains: 'john smith' } },
+      ],
+    });
+  });
+
+  it('splits multi-word queries into token groups when explicitly enabled', () => {
+    const result = buildSearchFilter({
+      query: 'john smith',
+      visibleFields: ['preferred_name', 'first_name', 'middle_name', 'last_name'],
+      fieldsInCollection: [
+        field({ field: 'preferred_name', type: 'string' }),
+        field({ field: 'first_name', type: 'string' }),
+        field({ field: 'middle_name', type: 'string' }),
+        field({ field: 'last_name', type: 'string' }),
+      ],
+      collection: 'people',
+      fieldsStore: fieldsStore({
+        people: {
+          preferred_name: field({ field: 'preferred_name', type: 'string' }),
+          first_name: field({ field: 'first_name', type: 'string' }),
+          middle_name: field({ field: 'middle_name', type: 'string' }),
+          last_name: field({ field: 'last_name', type: 'string' }),
+        },
+      }),
+      splitSearchTermsAcrossFields: true,
+    });
+
+    expect(result).toEqual({
+      _and: [
+        {
+          _or: [
+            { preferred_name: { _icontains: 'john' } },
+            { first_name: { _icontains: 'john' } },
+            { middle_name: { _icontains: 'john' } },
+            { last_name: { _icontains: 'john' } },
+          ],
+        },
+        {
+          _or: [
+            { preferred_name: { _icontains: 'smith' } },
+            { first_name: { _icontains: 'smith' } },
+            { middle_name: { _icontains: 'smith' } },
+            { last_name: { _icontains: 'smith' } },
+          ],
+        },
+      ],
+    });
+  });
+
   it('uses _eq with raw value for UUID fields when query is a valid UUID', () => {
     const validUuid = '11111111-2222-3333-4444-555555555555';
     const result = buildSearchFilter({
@@ -140,6 +215,44 @@ describe('buildSearchFilter — characterization (current behavior)', () => {
     });
   });
 
+  it('tokenizes direct-user relation search so name parts can match different nested fields', () => {
+    const authorField = field({ field: 'author', type: 'uuid' });
+    const result = buildSearchFilter({
+      query: 'john smith',
+      visibleFields: ['author'],
+      fieldsInCollection: [authorField],
+      collection: 'posts',
+      fieldsStore: fieldsStore({
+        posts: {
+          author: authorField,
+        },
+      }),
+      relationsStore: relationsStore({
+        'posts.author': [{ related_collection: 'directus_users' }],
+      }),
+      splitSearchTermsAcrossFields: true,
+    });
+
+    expect(result).toEqual({
+      _and: [
+        {
+          _or: [
+            { author: { first_name: { _icontains: 'john' } } },
+            { author: { last_name: { _icontains: 'john' } } },
+            { author: { email: { _icontains: 'john' } } },
+          ],
+        },
+        {
+          _or: [
+            { author: { first_name: { _icontains: 'smith' } } },
+            { author: { last_name: { _icontains: 'smith' } } },
+            { author: { email: { _icontains: 'smith' } } },
+          ],
+        },
+      ],
+    });
+  });
+
   it('strips language suffix and deduplicates fields across multi-language columns', () => {
     const result = buildSearchFilter({
       query: 'Berg',
@@ -202,6 +315,44 @@ describe('buildSearchFilter — characterization (current behavior)', () => {
       _or: [
         { name: { _icontains: 'hello' } },
         { description: { _icontains: 'hello' } },
+      ],
+    });
+  });
+
+  it('can restrict search to visible columns only when includeAllCollectionFields is false', () => {
+    const result = buildSearchFilter({
+      query: 'john smith',
+      visibleFields: ['first_name', 'last_name'],
+      fieldsInCollection: [
+        field({ field: 'first_name', type: 'string' }),
+        field({ field: 'last_name', type: 'string' }),
+        field({ field: 'biography', type: 'text' }),
+      ],
+      includeAllCollectionFields: false,
+      collection: 'people',
+      fieldsStore: fieldsStore({
+        people: {
+          first_name: field({ field: 'first_name', type: 'string' }),
+          last_name: field({ field: 'last_name', type: 'string' }),
+        },
+      }),
+      splitSearchTermsAcrossFields: true,
+    });
+
+    expect(result).toEqual({
+      _and: [
+        {
+          _or: [
+            { first_name: { _icontains: 'john' } },
+            { last_name: { _icontains: 'john' } },
+          ],
+        },
+        {
+          _or: [
+            { first_name: { _icontains: 'smith' } },
+            { last_name: { _icontains: 'smith' } },
+          ],
+        },
       ],
     });
   });

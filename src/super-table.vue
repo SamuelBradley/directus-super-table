@@ -859,6 +859,8 @@ const searchFilter = computed(() =>
     query: debouncedSearchQuery.value,
     visibleFields: fields.value,
     fieldsInCollection: fieldsInCollection.value,
+    includeAllCollectionFields: layoutOptions.value?.searchAllFields !== false,
+    splitSearchTermsAcrossFields: layoutOptions.value?.splitSearchTermsAcrossFields === true,
     collection: collection.value,
     fieldsStore,
     relationsStore,
@@ -926,6 +928,22 @@ watch(
     updateManualFilters(newFilter);
   },
   { immediate: true, deep: true }
+);
+
+let filterResetSeeded = false;
+watch(
+  [presetMergedFilters, () => props.filter],
+  () => {
+    if (!filterResetSeeded) {
+      filterResetSeeded = true;
+      return;
+    }
+
+    if (page.value !== 1) {
+      page.value = 1;
+    }
+  },
+  { deep: true }
 );
 
 // Combine all filters: presets + manual + search, then sanitize against
@@ -1410,6 +1428,9 @@ function openRowInNewTabOnModifier(event: MouseEvent) {
 
 // Watch for search changes
 watch(searchQuery, (val) => {
+  if (page.value !== 1) {
+    page.value = 1;
+  }
   applyDebouncedSearch(val);
   onSearchInput(val);
 });

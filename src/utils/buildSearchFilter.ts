@@ -51,6 +51,10 @@ export interface BuildSearchFilterArgs {
   visibleFields: string[];
   /** All fields of the collection, used as a fallback search scope when no visible field produces a clause. */
   fieldsInCollection: Field[];
+  /** When true, search also scans other searchable collection fields beyond the visible columns. Defaults to true. */
+  includeAllCollectionFields?: boolean;
+  /** When true, split whitespace-separated search terms so each part can match a different field. Defaults to false. */
+  splitSearchTermsAcrossFields?: boolean;
   /** Parent collection name. */
   collection: string;
   fieldsStore: FieldsStoreLike;
@@ -153,51 +157,25 @@ function buildDirectUserRelationClauses(fieldKey: string, searchValue: string): 
   ] as Filter[];
 }
 
-/**
- * Build a Directus filter for the user's search input.
- *
- * Replaces Directus' native `?search=` parameter with an explicit `_or` filter
- * because the native parameter cannot reach across translations and other
- * relational targets that this layout commonly exposes.
- *
- * Behavior overview:
- *
- *   1. Visible-field pass (per layout configuration)
- *      - `translations.<sub>`  → `{ translations: { _some: { <sub>: { _icontains } } } }`
- *      - other dot-notation    → `{ <fieldKey>: { _icontains } }`
- *      - top-level translations alias (issue #24 Sub-Bug B fix):
- *          One outer-_or clause per searchable column:
- *          `{ <aliasField>: { _some: { <col1>: { _icontains } } } }`,
- *          `{ <aliasField>: { _some: { <col2>: { _icontains } } } }`, …
- *          (We deliberately do NOT wrap them in a single `_some._or` because
- *          Directus' query parser does not evaluate `_or` inside `_some`
- *          correctly — it returns all rows.)
- *          Detected via `field.meta.special.includes('translations')`, so it
- *          works for any alias name (e.g. `translations`, `i18n`, `localizations`).
- *      - direct string/text    → `{ <fieldKey>: { _icontains } }`
- *      - direct uuid + valid UUID input → `{ <fieldKey>: { _eq } }`
- *      - direct integer + numeric input → `{ <fieldKey>: { _eq } }`
- *
- *   2. Hidden-field pass — cumulative (issue #24 Sub-Bug A fix)
- *      Runs ALWAYS in addition to the visible pass, not only when the visible
- *      pass yielded nothing. Fields already covered by the visible pass are
- *      skipped via `processedFields` so duplicates do not occur. This makes
- *      the layout's search match the broad coverage of Directus' native
- *      `?search=` parameter, which scans all string/text columns regardless
- *      of which are visible in the layout.
- *      - All string/text fields with `meta.hidden !== true`
- *      - UUID fields when input is a valid UUID
- *      - Integer fields when input is numeric
- *
- * @returns a filter `{ _or: [...] }` or `null` if no clauses were produced
- */
-export function buildSearchFilter(args: BuildSearchFilterArgs): Filter | null {
-  const { query, visibleFields, fieldsInCollection, collection, fieldsStore, relationsStore } =
-    args;
+function tokenizeQuery(query: string): string[] {
+  const tokens = query
+    .trim()
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
 
-  if (!query || query.trim() === '') return null;
+  return [...new Set(tokens)];
+}
 
-  const searchValue = query.trim();
+function buildClausesForSearchValue(args: BuildSearchFilterArgs, searchValue: string): Filter[] {
+  const {
+    visibleFields,
+    fieldsInCollection,
+    includeAllCollectionFields = true,
+    collection,
+    fieldsStore,
+    relationsStore,
+  } = args;
   const conditions: Filter[] = [];
   const processedFields = new Set<string>();
 
@@ -296,6 +274,10 @@ export function buildSearchFilter(args: BuildSearchFilterArgs): Filter | null {
   // Cumulative hidden-field pass — also covers columns the user has not added
   // to the layout. Fields already handled in the visible pass are skipped via
   // `processedFields`, so we never emit duplicate clauses.
+  if (!includeAllCollectionFields) {
+    return conditions;
+  }
+
   fieldsInCollection.forEach((field: Field) => {
     if (processedFields.has(field.field)) return;
     if (field.meta?.hidden === true) return;
@@ -328,7 +310,71 @@ export function buildSearchFilter(args: BuildSearchFilterArgs): Filter | null {
     }
   });
 
-  return conditions.length > 0 ? ({ _or: conditions } as Filter) : null;
+  return conditions;
+}
+
+/**
+ * Build a Directus filter for the user's search input.
+ *
+ * Replaces Directus' native `?search=` parameter with an explicit `_or` filter
+ * because the native parameter cannot reach across translations and other
+ * relational targets that this layout commonly exposes.
+ *
+ * Behavior overview:
+ *
+ *   1. Visible-field pass (per layout configuration)
+ *      - `translations.<sub>`  → `{ translations: { _some: { <sub>: { _icontains } } } }`
+ *      - other dot-notation    → `{ <fieldKey>: { _icontains } }`
+ *      - top-level translations alias (issue #24 Sub-Bug B fix):
+ *          One outer-_or clause per searchable column:
+ *          `{ <aliasField>: { _some: { <col1>: { _icontains } } } }`,
+ *          `{ <aliasField>: { _some: { <col2>: { _icontains } } } }`, …
+ *          (We deliberately do NOT wrap them in a single `_some._or` because
+ *          Directus' query parser does not evaluate `_or` inside `_some`
+ *          correctly — it returns all rows.)
+ *          Detected via `field.meta.special.includes('translations')`, so it
+ *          works for any alias name (e.g. `translations`, `i18n`, `localizations`).
+ *      - direct string/text    → `{ <fieldKey>: { _icontains } }`
+ *      - direct uuid + valid UUID input → `{ <fieldKey>: { _eq } }`
+ *      - direct integer + numeric input → `{ <fieldKey>: { _eq } }`
+ *
+ *   2. Hidden-field pass — cumulative (issue #24 Sub-Bug A fix)
+ *      Runs ALWAYS in addition to the visible pass, not only when the visible
+ *      pass yielded nothing. Fields already covered by the visible pass are
+ *      skipped via `processedFields` so duplicates do not occur. This makes
+ *      the layout's search match the broad coverage of Directus' native
+ *      `?search=` parameter, which scans all string/text columns regardless
+ *      of which are visible in the layout.
+ *      - All string/text fields with `meta.hidden !== true`
+ *      - UUID fields when input is a valid UUID
+ *      - Integer fields when input is numeric
+ *
+ * When `splitSearchTermsAcrossFields` is enabled, a multi-word search becomes
+ * `{ _and: [{ _or: ...token1... }, { _or: ...token2... }] }` so different
+ * fields can satisfy different parts of the query.
+ *
+ * @returns a filter `{ _or: [...] }`, `{ _and: [...] }`, or `null` if no clauses were produced
+ */
+export function buildSearchFilter(args: BuildSearchFilterArgs): Filter | null {
+  const { query, splitSearchTermsAcrossFields = false } = args;
+
+  if (!query || query.trim() === '') return null;
+
+  const searchValues = splitSearchTermsAcrossFields ? tokenizeQuery(query) : [query.trim()];
+  if (searchValues.length === 0) return null;
+
+  const tokenGroups = searchValues
+    .map((token) => buildClausesForSearchValue(args, token))
+    .filter((conditions) => conditions.length > 0);
+
+  if (tokenGroups.length === 0) return null;
+  if (tokenGroups.length === 1) {
+    return { _or: tokenGroups[0] } as Filter;
+  }
+
+  return {
+    _and: tokenGroups.map((conditions) => ({ _or: conditions })),
+  } as Filter;
 }
 
 function isTranslationsAlias(field: Field): boolean {

@@ -11,6 +11,30 @@
   </div>
 
   <div class="field">
+    <label class="type-label">Search All Fields</label>
+    <v-checkbox
+      v-model="searchAllFields"
+      label="Search non-visible searchable fields as well as visible columns"
+    />
+    <div class="hint">
+      Disable this to keep search restricted to the columns shown in the table. Useful for
+      targeted name searches and lower query cost.
+    </div>
+  </div>
+
+  <div class="field">
+    <label class="type-label">Split Search Terms Across Fields</label>
+    <v-checkbox
+      v-model="splitSearchTermsAcrossFields"
+      label="Treat space-separated search terms separately so each part can match a different field"
+    />
+    <div class="hint">
+      Example: searching &quot;John Smith&quot; can match a first name field and a last name field.
+      Leave this off for lists where the full search text should stay together.
+    </div>
+  </div>
+
+  <div class="field">
     <label class="type-label">Edit Mode</label>
     <v-checkbox v-model="editMode" label="Enable inline editing" />
   </div>
@@ -63,6 +87,8 @@ interface LayoutOptions {
   editMode?: boolean;
   directBooleanToggle?: boolean;
   spacing?: 'compact' | 'cozy' | 'comfortable';
+  searchAllFields?: boolean;
+  splitSearchTermsAcrossFields?: boolean;
   quickFilters?: any[];
   customFieldNames?: Record<string, string>;
   widths?: Record<string, number>;
@@ -121,6 +147,26 @@ const spacing = computed({
     layoutOptions.value = {
       ...layoutOptions.value,
       spacing: val || 'compact',
+    };
+  },
+});
+
+const searchAllFields = computed({
+  get: () => layoutOptions.value?.searchAllFields !== false,
+  set: (val) => {
+    layoutOptions.value = {
+      ...props.layoutOptions,
+      searchAllFields: val,
+    };
+  },
+});
+
+const splitSearchTermsAcrossFields = computed({
+  get: () => layoutOptions.value?.splitSearchTermsAcrossFields === true,
+  set: (val) => {
+    layoutOptions.value = {
+      ...props.layoutOptions,
+      splitSearchTermsAcrossFields: val,
     };
   },
 });
