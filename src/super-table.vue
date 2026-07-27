@@ -4,18 +4,35 @@
     <!-- Top Bar with Search and Filters -->
     <div class="table-toolbar" v-if="showToolbar">
       <div class="toolbar-content">
-        <div class="search-input">
-          <v-input v-model="searchQuery" type="search" placeholder="Quick search">
-            <template #prepend>
-              <v-icon name="search" />
-            </template>
-            <template #append v-if="isSearchUpdating">
-              <v-progress-circular indeterminate x-small />
-            </template>
-            <template #append v-else-if="searchQuery">
-              <v-icon name="close" clickable @click="searchQuery = ''" />
-            </template>
-          </v-input>
+        <div class="search-input" @keydown.stop @keyup.stop>
+          <div class="search-input-inner">
+            <v-icon name="search" class="search-icon" />
+            <input
+              ref="searchInputEl"
+              v-model="searchQuery"
+              type="text"
+              class="search-native-input"
+              placeholder="Quick search"
+              spellcheck="false"
+              autocomplete="off"
+            />
+            <v-progress-circular
+              v-if="isSearchUpdating"
+              indeterminate
+              x-small
+              class="search-spinner"
+            />
+            <v-icon
+              v-else-if="searchQuery"
+              name="close"
+              clickable
+              class="search-clear"
+              @click="
+                searchQuery = '';
+                searchInputEl?.focus();
+              "
+            />
+          </div>
         </div>
 
         <!-- Quick Filter Buttons -->
@@ -266,9 +283,20 @@
     <div v-else-if="!loading && !error" class="no-data">
       <div class="padding-box">
         <v-icon name="search" large />
-        <p v-if="hasActiveFilters || searchQuery || search">{{ t('no_results') }}</p>
+        <p
+          v-if="
+            hasActiveFilters || searchQuery || (typeof search === 'string' && search.length > 0)
+          "
+        >
+          {{ t('no_results') }}
+        </p>
         <p v-else>{{ t('no_items') }}</p>
-        <v-button v-if="hasActiveFilters || searchQuery || search" @click="clearAllFilters">
+        <v-button
+          v-if="
+            hasActiveFilters || searchQuery || (typeof search === 'string' && search.length > 0)
+          "
+          @click="clearAllFilters"
+        >
           {{ t('clear_filters') }}
         </v-button>
       </div>
@@ -317,7 +345,17 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, computed, toRefs, watch, unref, onMounted, onUnmounted, onActivated, type Ref } from 'vue';
+import {
+  ref,
+  computed,
+  toRefs,
+  watch,
+  unref,
+  onMounted,
+  onUnmounted,
+  onActivated,
+  type Ref,
+} from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { debounce } from 'lodash';
@@ -363,7 +401,7 @@ const props = defineProps<{
   layoutOptions?: LayoutOptions;
   layoutQuery?: LayoutQuery;
   filter?: any;
-  search?: string;
+  search?: string | null;
   readonly?: boolean;
   resetPreset?: () => void;
   clearFilters?: () => void;
@@ -806,6 +844,7 @@ const editMode = computed({
 // only for forward-compatibility; the equality guards make it loop-safe
 // should Directus ever whitelist `search` as a writable layout prop.
 const searchQuery = ref('');
+const searchInputEl = ref<HTMLInputElement | null>(null);
 const SEARCH_DEBOUNCE_MS = 500;
 // Debounced mirror that actually drives the request filter, so fast typing
 // fires one fetch after the user pauses instead of one per keystroke. Seeded
@@ -842,9 +881,26 @@ watch(
   { immediate: true }
 );
 
-const onSearchInput = debounce((val: string) => {
-  // Mirror native semantics: empty input is represented as null.
-  const outgoing = normalizeOutgoingSearch(val);
+// Prevent backspace/delete from bubbling up and closing the parent
+// drawer/dialog/popover. Directus drawers listen for unhandled keyboard
+// events and interpret backspace as a "go back" / close action. When the
+// super-table is rendered inside a M2O relational popover, the popover's
+// keydown handler fires before the v-input's handler because Directus
+// registers it on the document or a wrapping overlay. We stop propagation
+// on ALL keyboard events from the search input (via @keydown.stop on the
+// wrapper div) and additionally guard here for defense-in-depth.
+function handleSearchKeydown(event: KeyboardEvent) {
+  if (event.key === 'Backspace' || event.key === 'Delete') {
+    event.stopPropagation();
+  }
+}
+
+const onSearchInput = debounce((val: string | null) => {
+  // The v-input model can transiently be `null` when the host's M2O popover
+  // teardown cascades through v-model; normalise defensively before any
+  // string operation, otherwise `.trim()` throws in the bundle.
+  const safe = typeof val === 'string' ? val : '';
+  const outgoing = normalizeOutgoingSearch(safe);
   if ((search?.value ?? null) !== outgoing) {
     emit('update:search', outgoing);
   }
@@ -1218,7 +1274,7 @@ const hasActiveFilters = computed(() => {
   return (
     activePresetIds.value.length > 0 ||
     (filter.value && Object.keys(filter.value).length > 0) ||
-    (search.value && search.value.length > 0)
+    typeof search.value === 'string'
   );
 });
 
@@ -1527,9 +1583,51 @@ onUnmounted(() => {
   max-width: 400px;
 }
 
-.search-input :deep(.v-input) {
-  height: 36px !important;
-  min-height: 36px !important;
+.search-input-inner {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  border: var(--theme--border-width, 2px) solid var(--theme--form--field--input--border-color, var(--border-normal));
+  border-radius: var(--theme--border-radius, 6px);
+  background-color: var(--theme--form--field--input--background, var(--background-page));
+  padding: 0 8px;
+  gap: 6px;
+  transition: border-color var(--fast) var(--transition);
+}
+
+.search-input-inner:focus-within {
+  border-color: var(--theme--form--field--input--border-color-focus, var(--primary));
+}
+
+.search-icon {
+  --v-icon-color: var(--theme--foreground-subdued, var(--foreground-subdued));
+  flex-shrink: 0;
+}
+
+.search-native-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--theme--foreground, var(--foreground-normal));
+  font-size: 14px;
+  line-height: 1;
+  min-width: 0;
+}
+
+.search-native-input::placeholder {
+  color: var(--theme--foreground-subdued, var(--foreground-subdued));
+}
+
+.search-spinner {
+  flex-shrink: 0;
+}
+
+.search-clear {
+  --v-icon-color: var(--theme--foreground-subdued, var(--foreground-subdued));
+  --v-icon-color-hover: var(--theme--danger, var(--danger));
+  flex-shrink: 0;
+  cursor: pointer;
 }
 
 .toolbar-actions {
